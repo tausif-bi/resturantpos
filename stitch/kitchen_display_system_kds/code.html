@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Tactile Command | Kitchen Display System</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              colors: {
+                "surface-dim": "#dadada",
+                "surface-container": "#eeeeee",
+                "inverse-surface": "#2f3131",
+                "on-primary-fixed": "#3b0900",
+                "tertiary-container": "#0077cb",
+                "surface-bright": "#f9f9f9",
+                "outline-variant": "#e4beb4",
+                "inverse-on-surface": "#f1f1f1",
+                "error": "#ba1a1a",
+                "secondary-fixed": "#d7e4ec",
+                "on-secondary-fixed-variant": "#3c494f",
+                "on-background": "#1a1c1c",
+                "surface-tint": "#b02e00",
+                "on-tertiary-fixed-variant": "#00497e",
+                "on-primary": "#ffffff",
+                "tertiary-fixed-dim": "#a0caff",
+                "inverse-primary": "#ffb5a0",
+                "on-tertiary-container": "#fdfcff",
+                "on-surface": "#1a1c1c",
+                "primary-fixed": "#ffdbd1",
+                "on-secondary-fixed": "#111d23",
+                "on-primary-fixed-variant": "#872100",
+                "error-container": "#ffdad6",
+                "on-secondary-container": "#5a666d",
+                "secondary-fixed-dim": "#bbc8d0",
+                "surface-variant": "#e2e2e2",
+                "on-error-container": "#93000a",
+                "on-secondary": "#ffffff",
+                "surface-container-high": "#e8e8e8",
+                "on-tertiary": "#ffffff",
+                "surface-container-low": "#f3f3f3",
+                "on-error": "#ffffff",
+                "secondary": "#546067",
+                "on-primary-container": "#fffbff",
+                "surface": "#f9f9f9",
+                "background": "#f9f9f9",
+                "surface-container-highest": "#e2e2e2",
+                "secondary-container": "#d7e4ec",
+                "primary-container": "#d53e0b",
+                "primary": "#ac2d00",
+                "primary-fixed-dim": "#ffb5a0",
+                "outline": "#8f7068",
+                "tertiary-fixed": "#d2e4ff",
+                "on-surface-variant": "#5b4139",
+                "tertiary": "#005ea2",
+                "surface-container-lowest": "#ffffff",
+                "on-tertiary-fixed": "#001c37"
+              },
+              fontFamily: {
+                "headline": ["Manrope"],
+                "body": ["Inter"],
+                "label": ["Inter"]
+              },
+              borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+            },
+          },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .order-timer-critical {
+            animation: pulse-red 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse-red {
+            0%, 100% { background-color: rgba(186, 26, 26, 0.1); }
+            50% { background-color: rgba(186, 26, 26, 0.25); }
+        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #e2e2e2; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #dadada; }
+    </style>
+</head>
+<body class="bg-surface font-body text-on-surface overflow-hidden h-screen flex flex-col">
+<!-- Top Navigation Anchor (Shared Component Logic) -->
+<header class="fixed top-0 right-0 w-full h-16 z-40 bg-white/80 dark:bg-stone-950/80 backdrop-blur-md shadow-sm border-b border-stone-200/50 flex justify-between items-center px-8">
+<div class="flex items-center gap-6">
+<h1 class="font-manrope font-black text-orange-700 dark:text-orange-500 text-lg uppercase tracking-wider">Tactile POS</h1>
+<div class="h-6 w-[1px] bg-outline-variant/30"></div>
+<div class="flex gap-4">
+<button class="px-4 py-1 rounded-full bg-primary text-on-primary text-sm font-semibold">Kitchen</button>
+<button class="px-4 py-1 rounded-full text-stone-500 hover:text-stone-800 text-sm font-medium transition-colors">Analytics</button>
+<button class="px-4 py-1 rounded-full text-stone-500 hover:text-stone-800 text-sm font-medium transition-colors">Menu</button>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-stone-400">skillet</span>
+<span class="font-headline font-bold text-on-surface-variant">Station 01: GRILL</span>
+</div>
+<div class="h-6 w-[1px] bg-outline-variant/30"></div>
+<div class="flex items-center gap-4">
+<button class="flex items-center gap-2 px-4 py-2 bg-surface-container-high rounded-xl text-sm font-bold text-on-surface transition-all active:scale-95">
+<span class="material-symbols-outlined text-sm">notifications</span>
+<span class="uppercase tracking-tight">8 Alerts</span>
+</button>
+<div class="w-10 h-10 rounded-full bg-surface-container-highest overflow-hidden border-2 border-primary/20">
+<img class="w-full h-full object-cover" data-alt="Close-up portrait of a professional chef in white uniform with focused expression in a commercial kitchen setting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCKdLPIzxmjmAmfZF-7_XEuQ2Frxe2DsnSEKUzCis2h8XFpMEv_1a6RRXXytGeGe7Yr2p1QW8l_Jb8ENzVHFbKK3wlMM1oTsB-SzfcHImLeJIG3PEF0sRLOVlbNk5qGGLPIAJ5IsTKs1jTneAwVuNl3WbE9JbvYii2vcX8bDNn1iwm68NJP6Zru1iOcM9285bjinQHxAwuCqqAMsUeKTBrNrw3uu_wAWa-ldWm6SkeZ0MshBjrtdDLc2JcZpqEdiFNn50BFWK5ow8Jh"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Sub-Header: Station Routing & Filters -->
+<div class="mt-16 bg-surface-container-low px-8 py-4 flex items-center justify-between border-b border-outline-variant/10">
+<div class="flex gap-2">
+<button class="px-6 py-2 rounded-full bg-surface-container-lowest shadow-sm border border-outline-variant/20 text-sm font-bold text-primary flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+                ALL STATIONS
+            </button>
+<button class="px-6 py-2 rounded-full hover:bg-white/50 text-sm font-semibold text-secondary transition-all">Bar</button>
+<button class="px-6 py-2 rounded-full hover:bg-white/50 text-sm font-semibold text-secondary transition-all">Grill</button>
+<button class="px-6 py-2 rounded-full hover:bg-white/50 text-sm font-semibold text-secondary transition-all">Pantry</button>
+<button class="px-6 py-2 rounded-full hover:bg-white/50 text-sm font-semibold text-secondary transition-all">Pastry</button>
+</div>
+<div class="flex items-center gap-4 text-sm font-bold">
+<span class="text-secondary uppercase tracking-widest">Active Orders: 12</span>
+<div class="w-[1px] h-4 bg-outline-variant/40"></div>
+<span class="text-tertiary uppercase tracking-widest">Avg Time: 14m</span>
+</div>
+</div>
+<!-- KDS Main Grid -->
+<main class="flex-1 overflow-x-auto overflow-y-hidden p-8 bg-surface">
+<div class="flex gap-6 h-full min-w-max pb-4">
+<!-- Order Card 1: New -->
+<div class="w-[380px] h-full flex flex-col bg-surface-container-lowest rounded-xl shadow-lg border-l-[6px] border-primary overflow-hidden">
+<div class="p-5 flex justify-between items-start bg-surface-container-lowest">
+<div>
+<h2 class="font-headline text-3xl font-extrabold text-on-surface leading-none">Table 24</h2>
+<p class="font-label text-xs font-bold text-secondary mt-1 tracking-widest uppercase">Order #8821 • 12:42 PM</p>
+</div>
+<div class="px-3 py-1 bg-primary/10 rounded-lg">
+<span class="font-headline text-lg font-bold text-primary">04:12</span>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto px-5 py-2 space-y-6">
+<div class="space-y-4">
+<div class="flex justify-between items-start group">
+<div class="flex gap-3">
+<span class="font-headline text-xl font-bold text-on-surface">2x</span>
+<div>
+<p class="font-headline text-xl font-bold text-on-surface leading-tight">Dry-Aged Ribeye</p>
+<p class="font-body text-sm font-bold text-primary mt-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">priority_high</span> Medium Rare
+                                    </p>
+<p class="font-body text-sm font-medium text-tertiary">Extra Chimichurri</p>
+</div>
+</div>
+</div>
+<div class="flex justify-between items-start group">
+<div class="flex gap-3">
+<span class="font-headline text-xl font-bold text-on-surface">1x</span>
+<div>
+<p class="font-headline text-xl font-bold text-on-surface leading-tight">Truffle Fries</p>
+<p class="font-body text-sm font-bold text-error mt-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">block</span> No Parsley
+                                    </p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="p-5 pt-2 bg-surface-container-lowest border-t border-outline-variant/10">
+<div class="flex items-center gap-2 mb-4">
+<span class="w-3 h-3 rounded-full bg-primary animate-pulse"></span>
+<span class="font-label text-[10px] font-black uppercase tracking-[0.2em] text-primary">Status: NEW</span>
+</div>
+<button class="w-full py-4 bg-gradient-to-br from-primary to-primary-container text-on-primary rounded-xl font-headline font-bold text-lg shadow-md hover:shadow-lg transition-all active:scale-[0.98]">
+                        START PREPARING
+                    </button>
+</div>
+</div>
+<!-- Order Card 2: Preparing -->
+<div class="w-[380px] h-full flex flex-col bg-surface-container-lowest rounded-xl shadow-lg border-l-[6px] border-tertiary overflow-hidden">
+<div class="p-5 flex justify-between items-start bg-surface-container-lowest">
+<div>
+<h2 class="font-headline text-3xl font-extrabold text-on-surface leading-none">Table 12</h2>
+<p class="font-label text-xs font-bold text-secondary mt-1 tracking-widest uppercase">Order #8819 • 12:35 PM</p>
+</div>
+<div class="px-3 py-1 bg-tertiary/10 rounded-lg">
+<span class="font-headline text-lg font-bold text-tertiary">11:45</span>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto px-5 py-2 space-y-6">
+<div class="space-y-4">
+<div class="flex justify-between items-start opacity-50">
+<div class="flex gap-3">
+<span class="material-symbols-outlined text-tertiary">check_circle</span>
+<div>
+<p class="font-headline text-xl font-bold text-on-surface leading-tight line-through">Caesar Salad</p>
+</div>
+</div>
+</div>
+<div class="flex justify-between items-start">
+<div class="flex gap-3">
+<span class="font-headline text-xl font-bold text-on-surface">3x</span>
+<div>
+<p class="font-headline text-xl font-bold text-on-surface leading-tight">Pan-Seared Salmon</p>
+<p class="font-body text-sm font-bold text-primary mt-1">Crispy Skin</p>
+</div>
+</div>
+</div>
+<div class="flex justify-between items-start">
+<div class="flex gap-3">
+<span class="font-headline text-xl font-bold text-on-surface">1x</span>
+<div>
+<p class="font-headline text-xl font-bold text-on-surface leading-tight">Wild Mushroom Risotto</p>
+<p class="font-body text-sm font-bold text-error mt-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">block</span> No Dairy / Vegan
+                                    </p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="p-5 pt-2 bg-surface-container-lowest border-t border-outline-variant/10">
+<div class="flex items-center gap-2 mb-4">
+<span class="w-3 h-3 rounded-full bg-tertiary"></span>
+<span class="font-label text-[10px] font-black uppercase tracking-[0.2em] text-tertiary">Status: PREPARING</span>
+</div>
+<button class="w-full py-4 bg-tertiary text-on-tertiary rounded-xl font-headline font-bold text-lg shadow-md hover:shadow-lg transition-all active:scale-[0.98]">
+                        MARK AS READY
+                    </button>
+</div>
+</div>
+<!-- Order Card 3: Delayed/Critical -->
+<div class="w-[380px] h-full flex flex-col bg-surface-container-lowest rounded-xl shadow-lg border-l-[6px] border-error overflow-hidden">
+<div class="p-5 flex justify-between items-start bg-error/5">
+<div>
+<h2 class="font-headline text-3xl font-extrabold text-error leading-none">Table 04</h2>
+<p class="font-label text-xs font-bold text-error/70 mt-1 tracking-widest uppercase">Order #8815 • 12:20 PM</p>
+</div>
+<div class="px-3 py-1 bg-error rounded-lg order-timer-critical">
+<span class="font-headline text-lg font-bold text-on-error">26:08</span>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto px-5 py-2 space-y-6">
+<div class="space-y-4">
+<div class="flex justify-between items-start">
+<div class="flex gap-3">
+<span class="font-headline text-xl font-bold text-on-surface">4x</span>
+<div>
+<p class="font-headline text-xl font-bold text-on-surface leading-tight">Wagyu Smash Burger</p>
+<p class="font-body text-sm font-bold text-error mt-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">block</span> No Onions
+                                    </p>
+</div>
+</div>
+</div>
+<div class="flex justify-between items-start">
+<div class="flex gap-3">
+<span class="font-headline text-xl font-bold text-on-surface">2x</span>
+<div>
+<p class="font-headline text-xl font-bold text-on-surface leading-tight">Lobster Bisque</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="p-5 pt-2 bg-error/5 border-t border-error/10">
+<div class="flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-error text-lg">warning</span>
+<span class="font-label text-[10px] font-black uppercase tracking-[0.2em] text-error">Status: LATE</span>
+</div>
+<div class="flex gap-2">
+<button class="flex-1 py-4 bg-error text-on-error rounded-xl font-headline font-bold text-lg shadow-md active:scale-[0.98]">READY</button>
+<button class="w-16 py-4 bg-surface-container-high text-on-surface rounded-xl flex items-center justify-center">
+<span class="material-symbols-outlined">help</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Order Card 4: New -->
+<div class="w-[380px] h-full flex flex-col bg-surface-container-lowest rounded-xl shadow-lg border-l-[6px] border-primary overflow-hidden">
+<div class="p-5 flex justify-between items-start">
+<div>
+<h2 class="font-headline text-3xl font-extrabold text-on-surface leading-none">Table 09</h2>
+<p class="font-label text-xs font-bold text-secondary mt-1 tracking-widest uppercase">Order #8825 • 12:45 PM</p>
+</div>
+<div class="px-3 py-1 bg-primary/10 rounded-lg">
+<span class="font-headline text-lg font-bold text-primary">01:55</span>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto px-5 py-2 space-y-6">
+<div class="space-y-4">
+<div class="flex justify-between items-start">
+<div class="flex gap-3">
+<span class="font-headline text-xl font-bold text-on-surface">1x</span>
+<div>
+<p class="font-headline text-xl font-bold text-on-surface leading-tight">Margherita Pizza</p>
+<p class="font-body text-sm font-bold text-primary mt-1">Extra Basil</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="p-5 pt-2 bg-surface-container-lowest border-t border-outline-variant/10">
+<div class="flex items-center gap-2 mb-4">
+<span class="w-3 h-3 rounded-full bg-primary animate-pulse"></span>
+<span class="font-label text-[10px] font-black uppercase tracking-[0.2em] text-primary">Status: NEW</span>
+</div>
+<button class="w-full py-4 bg-gradient-to-br from-primary to-primary-container text-on-primary rounded-xl font-headline font-bold text-lg shadow-md active:scale-[0.98]">
+                        START PREPARING
+                    </button>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer: System Stats & Quick Actions -->
+<footer class="h-14 bg-surface-container-highest flex items-center justify-between px-8 border-t border-outline-variant/20">
+<div class="flex gap-8">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-green-500"></span>
+<span class="font-label text-[10px] font-bold text-secondary uppercase tracking-widest">Printer: Online</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-green-500"></span>
+<span class="font-label text-[10px] font-bold text-secondary uppercase tracking-widest">POS Sync: Active</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="font-label text-[10px] font-bold text-secondary uppercase tracking-widest">Network: 12ms</span>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<button class="flex items-center gap-2 text-primary font-bold text-xs uppercase tracking-widest hover:underline">
+<span class="material-symbols-outlined text-sm">history</span>
+                Order History
+            </button>
+<div class="w-[1px] h-4 bg-outline-variant/40"></div>
+<p class="font-label text-xs font-bold text-secondary uppercase tracking-widest">v2.4.0-tactile</p>
+</div>
+</footer>
+<!-- Tactical Overlay: Notification Toast (Simulated) -->
+<div class="fixed bottom-20 left-1/2 -translate-x-1/2 px-6 py-3 bg-inverse-surface text-inverse-on-surface rounded-full shadow-2xl flex items-center gap-4 z-50">
+<span class="material-symbols-outlined text-primary">campaign</span>
+<p class="font-body text-sm font-bold">New modification for Table 24: <span class="text-primary-fixed-dim italic">"Allergy Alert: Shellfish"</span></p>
+<button class="ml-4 px-3 py-1 bg-white/10 hover:bg-white/20 rounded-full text-[10px] font-black uppercase tracking-tighter">Acknowledge</button>
+</div>
+</body></html>
