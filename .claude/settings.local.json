@@ -6,7 +6,25 @@
       "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --turbopack --yes)",
       "Bash(npm install:*)",
       "Bash(npx prisma:*)",
-      "Bash(npx shadcn@latest init -d --yes)"
+      "Bash(npx shadcn@latest init -d --yes)",
+      "Bash(npx shadcn@latest add input dialog dropdown-menu table card badge sheet tabs skeleton form label select textarea separator avatar popover command sidebar toast tooltip scroll-area checkbox switch -y)",
+      "Bash(npx shadcn@latest add input dialog dropdown-menu table card badge sheet tabs skeleton form label select textarea separator avatar popover command sidebar sonner tooltip scroll-area checkbox switch -y)",
+      "Bash(npx shadcn@latest add form -y)",
+      "Bash(npx next:*)",
+      "Bash(rm -f prisma.config.ts)",
+      "Bash(rm -rf src/generated)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "mcp__plugin_playwright_playwright__browser_click",
+      "mcp__plugin_playwright_playwright__browser_fill_form",
+      "mcp__plugin_playwright_playwright__browser_handle_dialog",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "Bash(npx tsc:*)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(npx tsx *)",
+      "Bash(npm run *)",
+      "Bash(git -C \"C:/Users/Tausif-Aventador/SaaS Ideas/resturant_pos\" status --short)",
+      "Bash(git *)"
     ]
   }
 }

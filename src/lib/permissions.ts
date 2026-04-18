@@ -1,0 +1,78 @@
+import { UserRole } from "@prisma/client";
+
+export const PERMISSIONS = {
+  MANAGE_TENANTS: "manage_tenants",
+  MANAGE_SUBSCRIPTION: "manage_subscription",
+  MANAGE_OUTLETS: "manage_outlets",
+  MANAGE_STAFF: "manage_staff",
+  MANAGE_MENU: "manage_menu",
+  MANAGE_INVENTORY: "manage_inventory",
+  VIEW_REPORTS: "view_reports",
+  MANAGE_SETTINGS: "manage_settings",
+  CREATE_ORDER: "create_order",
+  MANAGE_BILLING: "manage_billing",
+  APPLY_DISCOUNT: "apply_discount",
+  VIEW_KOT: "view_kot",
+  UPDATE_KOT_STATUS: "update_kot_status",
+  MANAGE_TABLES: "manage_tables",
+  VIEW_CUSTOMERS: "view_customers",
+} as const;
+
+type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
+
+const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
+  SUPER_ADMIN: Object.values(PERMISSIONS),
+  OWNER: [
+    PERMISSIONS.MANAGE_SUBSCRIPTION,
+    PERMISSIONS.MANAGE_OUTLETS,
+    PERMISSIONS.MANAGE_STAFF,
+    PERMISSIONS.MANAGE_MENU,
+    PERMISSIONS.MANAGE_INVENTORY,
+    PERMISSIONS.VIEW_REPORTS,
+    PERMISSIONS.MANAGE_SETTINGS,
+    PERMISSIONS.CREATE_ORDER,
+    PERMISSIONS.MANAGE_BILLING,
+    PERMISSIONS.APPLY_DISCOUNT,
+    PERMISSIONS.VIEW_KOT,
+    PERMISSIONS.UPDATE_KOT_STATUS,
+    PERMISSIONS.MANAGE_TABLES,
+    PERMISSIONS.VIEW_CUSTOMERS,
+  ],
+  MANAGER: [
+    PERMISSIONS.MANAGE_STAFF,
+    PERMISSIONS.MANAGE_MENU,
+    PERMISSIONS.MANAGE_INVENTORY,
+    PERMISSIONS.VIEW_REPORTS,
+    PERMISSIONS.MANAGE_SETTINGS,
+    PERMISSIONS.CREATE_ORDER,
+    PERMISSIONS.MANAGE_BILLING,
+    PERMISSIONS.APPLY_DISCOUNT,
+    PERMISSIONS.VIEW_KOT,
+    PERMISSIONS.UPDATE_KOT_STATUS,
+    PERMISSIONS.MANAGE_TABLES,
+    PERMISSIONS.VIEW_CUSTOMERS,
+  ],
+  CASHIER: [
+    PERMISSIONS.CREATE_ORDER,
+    PERMISSIONS.MANAGE_BILLING,
+    PERMISSIONS.VIEW_KOT,
+    PERMISSIONS.VIEW_CUSTOMERS,
+  ],
+  KITCHEN_STAFF: [
+    PERMISSIONS.VIEW_KOT,
+    PERMISSIONS.UPDATE_KOT_STATUS,
+  ],
+  WAITER: [
+    PERMISSIONS.CREATE_ORDER,
+    PERMISSIONS.VIEW_KOT,
+    PERMISSIONS.VIEW_CUSTOMERS,
+  ],
+};
+
+export function hasPermission(role: UserRole, permission: string): boolean {
+  return ROLE_PERMISSIONS[role]?.includes(permission as Permission) ?? false;
+}
+
+export function getUserPermissions(role: UserRole): Permission[] {
+  return ROLE_PERMISSIONS[role] ?? [];
+}

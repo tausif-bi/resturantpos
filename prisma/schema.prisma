@@ -1,6 +1,5 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -291,6 +290,7 @@ model MenuItem {
   categoryId      String
   category        Category   @relation(fields: [categoryId], references: [id])
   name            String
+  shortCode       String?
   description     String?
   imageUrl        String?
   basePrice       Decimal    @db.Decimal(10, 2)
@@ -307,6 +307,7 @@ model MenuItem {
   recipeItems RecipeItem[]
   orderItems  OrderItem[]
 
+  @@unique([restaurantId, shortCode])
   @@index([restaurantId])
   @@index([categoryId])
 }
@@ -499,6 +500,7 @@ model Customer {
   phone       String
   email       String?
   address     String?
+  locality    String?
   notes       String?
   totalOrders Int      @default(0)
   totalSpent  Decimal  @default(0) @db.Decimal(12, 2)
