@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { formatCurrency } from "@/lib/utils";
+import {
+  DATE_RANGE_PRESETS,
+  formatRangeLabel,
+  resolveDateRange,
+  type DateRangeKey,
+} from "@/lib/date-range";
 
 interface DashboardStats {
   totalSales: number;
@@ -21,6 +29,9 @@ interface CategoryMixItem {
 interface DashboardClientProps {
   stats: DashboardStats;
   categoryMix: CategoryMixItem[];
+  rangeKey: DateRangeKey;
+  from?: string;
+  to?: string;
 }
 
 const categoryColors = [
@@ -30,27 +41,141 @@ const categoryColors = [
   "bg-orange-400",
 ];
 
-export function DashboardClient({ stats, categoryMix }: DashboardClientProps) {
+export function DashboardClient({
+  stats,
+  categoryMix,
+  rangeKey,
+  from,
+  to,
+}: DashboardClientProps) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [customFrom, setCustomFrom] = useState(from ?? "");
+  const [customTo, setCustomTo] = useState(to ?? "");
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const range = resolveDateRange(rangeKey, from, to);
+  const rangeLabel = formatRangeLabel(range);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  function selectPreset(key: DateRangeKey) {
+    if (key === "custom") return;
+    const params = new URLSearchParams();
+    params.set("range", key);
+    router.push(`/dashboard?${params.toString()}`);
+    setOpen(false);
+  }
+
+  function applyCustomRange() {
+    if (!customFrom || !customTo) return;
+    const params = new URLSearchParams();
+    params.set("range", "custom");
+    params.set("from", customFrom);
+    params.set("to", customTo);
+    router.push(`/dashboard?${params.toString()}`);
+    setOpen(false);
+  }
+
+  function exportPdf() {
+    if (typeof window !== "undefined") window.print();
+  }
+
   return (
     <div>
       {/* Header */}
-      <div className="flex justify-between items-end mb-10">
+      <div className="flex justify-between items-end mb-10 print:hidden">
         <div>
           <h2 className="text-3xl font-black font-headline tracking-tight text-on-surface">
             Analytics Hub
           </h2>
           <p className="text-secondary mt-1">
-            Real-time performance metrics for your restaurant
+            Performance metrics for {rangeLabel.toLowerCase()}
           </p>
         </div>
         <div className="flex gap-3">
-          <div className="flex items-center bg-surface-container-lowest border border-outline-variant/30 rounded-xl px-4 py-2 shadow-sm">
-            <span className="material-symbols-outlined text-primary text-sm mr-2">
-              calendar_today
-            </span>
-            <span className="text-sm font-semibold text-on-surface">Today</span>
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setOpen((v) => !v)}
+              className="flex items-center bg-surface-container-lowest border border-outline-variant/30 rounded-xl px-4 py-2 shadow-sm hover:border-primary/40 transition-colors"
+            >
+              <span className="material-symbols-outlined text-primary text-sm mr-2">
+                calendar_today
+              </span>
+              <span className="text-sm font-semibold text-on-surface">
+                {rangeLabel}
+              </span>
+              <span className="material-symbols-outlined text-secondary text-sm ml-2">
+                {open ? "expand_less" : "expand_more"}
+              </span>
+            </button>
+            {open && (
+              <div className="absolute right-0 top-full mt-2 w-64 bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-xl z-30 p-2">
+                {DATE_RANGE_PRESETS.filter((p) => p.key !== "custom").map(
+                  (preset) => (
+                    <button
+                      key={preset.key}
+                      onClick={() => selectPreset(preset.key)}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                        rangeKey === preset.key
+                          ? "bg-primary/10 text-primary"
+                          : "text-on-surface hover:bg-surface-container"
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  )
+                )}
+                <div className="border-t border-outline-variant/20 mt-2 pt-2">
+                  <p className="px-3 text-[11px] font-bold text-secondary uppercase tracking-wider mb-2">
+                    Custom range
+                  </p>
+                  <div className="px-3 space-y-2">
+                    <label className="block text-[11px] font-semibold text-secondary">
+                      From
+                      <input
+                        type="date"
+                        value={customFrom}
+                        onChange={(e) => setCustomFrom(e.target.value)}
+                        className="mt-1 w-full px-2 py-1.5 bg-surface-container border border-outline-variant/30 rounded-lg text-sm font-medium text-on-surface focus:outline-none focus:border-primary/50"
+                      />
+                    </label>
+                    <label className="block text-[11px] font-semibold text-secondary">
+                      To
+                      <input
+                        type="date"
+                        value={customTo}
+                        onChange={(e) => setCustomTo(e.target.value)}
+                        className="mt-1 w-full px-2 py-1.5 bg-surface-container border border-outline-variant/30 rounded-lg text-sm font-medium text-on-surface focus:outline-none focus:border-primary/50"
+                      />
+                    </label>
+                    <button
+                      onClick={applyCustomRange}
+                      disabled={!customFrom || !customTo}
+                      className="w-full mt-1 primary-gradient text-white text-sm font-bold py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Apply range
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-          <button className="flex items-center gap-2 bg-surface-container-highest px-4 py-2 rounded-xl text-sm font-bold text-on-surface hover:bg-surface-dim transition-all">
+          <button
+            onClick={exportPdf}
+            className="flex items-center gap-2 bg-surface-container-highest px-4 py-2 rounded-xl text-sm font-bold text-on-surface hover:bg-surface-dim transition-all"
+          >
             <span className="material-symbols-outlined text-sm">download</span>
             Export PDF
           </button>

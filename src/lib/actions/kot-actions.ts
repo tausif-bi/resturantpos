@@ -67,7 +67,11 @@ export async function getActiveKOTs(stationFilter?: string) {
         },
       },
       order: {
-        include: { table: true },
+        include: {
+          table: true,
+          createdBy: { select: { name: true } },
+          customer: { select: { name: true, phone: true } },
+        },
       },
     },
     orderBy: { createdAt: "asc" },
@@ -127,4 +131,25 @@ export async function updateKOTStatus(kotId: string, status: KOTStatus) {
   revalidatePath("/kitchen");
   revalidatePath("/pos");
   return serialize(kot);
+}
+
+export async function setOrderItemPrepared(itemId: string, prepared: boolean) {
+  const { restaurantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  const item = await prisma.orderItem.findUnique({
+    where: { id: itemId },
+    select: { order: { select: { restaurantId: true } } },
+  });
+  if (!item || item.order.restaurantId !== restaurantId) {
+    throw new Error("Item not found");
+  }
+
+  const updated = await prisma.orderItem.update({
+    where: { id: itemId },
+    data: { preparedAt: prepared ? new Date() : null },
+  });
+
+  revalidatePath("/kitchen");
+  return serialize(updated);
 }

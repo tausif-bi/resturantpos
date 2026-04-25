@@ -37,6 +37,8 @@ type Props = {
   menuItems: MenuItem[];
 };
 
+type PaymentMode = "CASH" | "CARD" | "UPI";
+
 export function POSClient({ tables, nonDineOrders, categories, menuItems }: Props) {
   const [orderType, setOrderType] = useState<OrderType>("DINE_IN");
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
@@ -45,6 +47,7 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
   const [menuCategory, setMenuCategory] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
+  const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null);
   const [, setTick] = useState(0);
   const [isPending, startTransition] = useTransition();
 
@@ -53,6 +56,11 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Reset payment mode whenever the active order changes
+  useEffect(() => {
+    setPaymentMode(null);
+  }, [selectedTableId, selectedOrderId]);
 
   // Resolve the currently active order from whichever source matches the mode.
   const selectedTable = tables.find((t) => t.id === selectedTableId);
@@ -102,6 +110,7 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
     setSelectedOrderId(null);
     setMenuOpen(false);
     setSearch("");
+    setPaymentMode(null);
   }
 
   function switchOrderType(type: OrderType) {
@@ -192,14 +201,18 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
     });
   }
 
-  function handlePayment(mode: "CASH" | "CARD" | "UPI") {
+  function handleSettle() {
     if (!orderId || totalAmount <= 0) return;
+    if (!paymentMode) {
+      toast.info("Select a payment method first");
+      return;
+    }
     const remaining = totalAmount - totalPaid;
     if (remaining <= 0) return;
 
     startTransition(async () => {
       try {
-        await createPayment({ orderId, mode, amount: remaining });
+        await createPayment({ orderId, mode: paymentMode, amount: remaining });
         clearSelection();
         toast.success("Payment recorded — order completed");
       } catch (error) {
@@ -662,7 +675,11 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
                 <button
                   onClick={handleSendKOT}
                   disabled={isPending || unsentItems.length === 0}
-                  className="flex items-center justify-center gap-1.5 bg-surface-container-highest text-on-surface text-xs font-bold py-2.5 rounded-lg hover:bg-surface-dim transition-colors disabled:opacity-40"
+                  className={`flex items-center justify-center gap-1.5 text-xs font-bold py-2.5 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    unsentItems.length > 0
+                      ? "primary-gradient text-white shadow hover:shadow-md"
+                      : "bg-surface-container-highest text-on-surface"
+                  }`}
                 >
                   <span className="material-symbols-outlined text-sm">print</span>
                   Send KOT ({unsentItems.length})
@@ -677,30 +694,63 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
                 </button>
               </div>
 
-              {/* Payment Methods */}
+              {/* Payment Methods (select one, then settle) */}
               <div className="flex gap-2">
-                {(["CASH", "CARD", "UPI"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => handlePayment(mode)}
-                    disabled={isPending || totalAmount <= 0}
-                    className="flex-1 flex flex-col items-center gap-1 bg-surface-container-lowest border border-outline-variant/30 py-2.5 rounded-lg text-secondary hover:text-primary hover:border-primary/30 transition-all disabled:opacity-40"
-                  >
-                    <span className="material-symbols-outlined text-lg">
-                      {mode === "CASH" ? "payments" : mode === "CARD" ? "credit_card" : "qr_code_2"}
-                    </span>
-                    <span className="text-[10px] font-bold uppercase tracking-wider">{mode}</span>
-                  </button>
-                ))}
+                {(["CASH", "CARD", "UPI"] as const).map((mode) => {
+                  const selected = paymentMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      onClick={() =>
+                        setPaymentMode(selected ? null : mode)
+                      }
+                      disabled={isPending || totalAmount <= 0}
+                      className={`flex-1 flex flex-col items-center gap-1 border py-2.5 rounded-lg transition-all disabled:opacity-40 relative ${
+                        selected
+                          ? "bg-primary/10 border-primary text-primary shadow-sm"
+                          : "bg-surface-container-lowest border-outline-variant/30 text-secondary hover:text-primary hover:border-primary/30"
+                      }`}
+                      aria-pressed={selected}
+                    >
+                      <span
+                        className={`absolute top-1.5 right-1.5 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                          selected
+                            ? "bg-primary border-primary"
+                            : "bg-white border-outline-variant/50"
+                        }`}
+                      >
+                        {selected && (
+                          <span className="material-symbols-outlined text-white text-[12px] leading-none font-black">
+                            check
+                          </span>
+                        )}
+                      </span>
+                      <span className="material-symbols-outlined text-lg">
+                        {mode === "CASH"
+                          ? "payments"
+                          : mode === "CARD"
+                            ? "credit_card"
+                            : "qr_code_2"}
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider">
+                        {mode}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
               <button
-                onClick={() => handlePayment("CASH")}
-                disabled={isPending || totalAmount <= 0}
-                className="w-full primary-gradient text-on-primary font-bold py-3.5 rounded-xl text-sm shadow-lg hover:shadow-xl active:scale-[0.99] transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+                onClick={handleSettle}
+                disabled={isPending || totalAmount <= 0 || !paymentMode}
+                className="w-full primary-gradient text-on-primary font-bold py-3.5 rounded-xl text-sm shadow-lg hover:shadow-xl active:scale-[0.99] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <span className="material-symbols-outlined text-lg">check_circle</span>
-                Settle Bill — {formatCurrency(totalAmount)}
+                <span className="material-symbols-outlined text-lg">
+                  check_circle
+                </span>
+                {paymentMode
+                  ? `Settle ${paymentMode} — ${formatCurrency(totalAmount)}`
+                  : `Select payment method to settle`}
               </button>
             </div>
           </>

@@ -3,53 +3,56 @@
 import { prisma } from "@/lib/db";
 import { getTenantScope } from "@/lib/tenant";
 import { serialize } from "@/lib/utils";
+import type { DateRange } from "@/lib/date-range";
 
-export async function getDashboardStats() {
+function defaultRange(): { from: Date; to: Date } {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  return { from: start, to: end };
+}
+
+export async function getDashboardStats(range?: DateRange) {
   const { restaurantId } = await getTenantScope();
   if (!restaurantId) throw new Error("No restaurant selected");
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const r = range ?? defaultRange();
 
   const [salesData, orderCount, activeTables, totalTables, topItem] =
     await Promise.all([
-      // Today's completed orders total
       prisma.order.aggregate({
         where: {
           restaurantId,
           status: "COMPLETED",
-          completedAt: { gte: today },
+          completedAt: { gte: r.from, lte: r.to },
         },
         _sum: { totalAmount: true },
       }),
 
-      // Today's order count
       prisma.order.count({
         where: {
           restaurantId,
-          createdAt: { gte: today },
+          createdAt: { gte: r.from, lte: r.to },
           status: { not: "CANCELLED" },
         },
       }),
 
-      // Active tables
       prisma.table.count({
         where: { restaurantId, status: "OCCUPIED" },
       }),
 
-      // Total tables
       prisma.table.count({
         where: { restaurantId },
       }),
 
-      // Top selling item today
       prisma.orderItem.groupBy({
         by: ["menuItemId"],
         where: {
           order: {
             restaurantId,
             status: "COMPLETED",
-            completedAt: { gte: today },
+            completedAt: { gte: r.from, lte: r.to },
           },
         },
         _sum: { quantity: true },
@@ -79,19 +82,18 @@ export async function getDashboardStats() {
   };
 }
 
-export async function getCategoryMix() {
+export async function getCategoryMix(range?: DateRange) {
   const { restaurantId } = await getTenantScope();
   if (!restaurantId) throw new Error("No restaurant selected");
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const r = range ?? defaultRange();
 
   const items = await prisma.orderItem.findMany({
     where: {
       order: {
         restaurantId,
         status: "COMPLETED",
-        completedAt: { gte: today },
+        completedAt: { gte: r.from, lte: r.to },
       },
     },
     include: {

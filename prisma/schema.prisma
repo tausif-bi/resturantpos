@@ -413,20 +413,21 @@ model Order {
 }
 
 model OrderItem {
-  id         String   @id @default(cuid())
-  orderId    String
-  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  menuItemId String
-  menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
-  variantId  String?
-  variant    Variant? @relation(fields: [variantId], references: [id])
-  quantity   Int
-  unitPrice  Decimal  @db.Decimal(10, 2)
-  totalPrice Decimal  @db.Decimal(10, 2)
-  notes      String?
-  kotId      String?
-  kot        KOT?     @relation(fields: [kotId], references: [id])
-  createdAt  DateTime @default(now())
+  id          String    @id @default(cuid())
+  orderId     String
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId  String
+  menuItem    MenuItem  @relation(fields: [menuItemId], references: [id])
+  variantId   String?
+  variant     Variant?  @relation(fields: [variantId], references: [id])
+  quantity    Int
+  unitPrice   Decimal   @db.Decimal(10, 2)
+  totalPrice  Decimal   @db.Decimal(10, 2)
+  notes       String?
+  kotId       String?
+  kot         KOT?      @relation(fields: [kotId], references: [id])
+  preparedAt  DateTime?
+  createdAt   DateTime  @default(now())
 
   addOns OrderItemAddOn[]
 
