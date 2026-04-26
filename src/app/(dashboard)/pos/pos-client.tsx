@@ -610,22 +610,19 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
                         <p className="text-[10px] text-secondary italic truncate">{item.notes}</p>
                       )}
                       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        <button
-                          onClick={() => handleUpdateQty(item.id, item.quantity - 1)}
+                        <QuantityInput
+                          value={item.quantity}
                           disabled={isPending}
-                          className="h-6 w-6 rounded-md bg-surface-container-highest flex items-center justify-center hover:bg-surface-dim transition-colors disabled:opacity-50"
-                        >
-                          <span className="material-symbols-outlined text-sm">remove</span>
-                        </button>
-                        <span className="text-sm font-black text-on-surface w-6 text-center">
-                          {item.quantity}
-                        </span>
+                          onCommit={(next) => handleUpdateQty(item.id, next)}
+                        />
                         <button
-                          onClick={() => handleUpdateQty(item.id, item.quantity + 1)}
+                          onClick={() => handleUpdateQty(item.id, 0)}
                           disabled={isPending}
-                          className="h-6 w-6 rounded-md bg-surface-container-highest flex items-center justify-center hover:bg-surface-dim transition-colors disabled:opacity-50"
+                          className="h-6 w-6 rounded-md bg-surface-container-highest text-secondary flex items-center justify-center hover:bg-error/10 hover:text-error transition-colors disabled:opacity-50"
+                          title="Remove item"
+                          aria-label="Remove item"
                         >
-                          <span className="material-symbols-outlined text-sm">add</span>
+                          <span className="material-symbols-outlined text-sm">close</span>
                         </button>
                         {!item.kotId && (
                           <button
@@ -1001,5 +998,62 @@ function NonDineQueue({
         </div>
       )}
     </>
+  );
+}
+
+function QuantityInput({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: number;
+  disabled?: boolean;
+  onCommit: (next: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    if (trimmed === "") {
+      setDraft(String(value));
+      return;
+    }
+    const n = parseInt(trimmed, 10);
+    if (!Number.isFinite(n) || n < 1) {
+      setDraft(String(value));
+      return;
+    }
+    if (n === value) {
+      setDraft(String(value));
+      return;
+    }
+    onCommit(n);
+  };
+
+  return (
+    <input
+      type="number"
+      min={1}
+      step={1}
+      inputMode="numeric"
+      value={draft}
+      disabled={disabled}
+      onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.currentTarget.blur();
+        } else if (e.key === "Escape") {
+          setDraft(String(value));
+          e.currentTarget.blur();
+        }
+      }}
+      onFocus={(e) => e.currentTarget.select()}
+      className="h-7 w-14 rounded-md bg-surface-container-highest text-sm font-black text-on-surface text-center focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+    />
   );
 }
