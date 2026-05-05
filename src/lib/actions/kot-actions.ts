@@ -133,6 +133,74 @@ export async function updateKOTStatus(kotId: string, status: KOTStatus) {
   return serialize(kot);
 }
 
+export async function getRecentReadyKOTs(sinceMinutes: number = 240) {
+  const { restaurantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  const cutoff = new Date(Date.now() - sinceMinutes * 60_000);
+
+  const kots = await prisma.kOT.findMany({
+    where: {
+      restaurantId,
+      status: "READY",
+      readyAt: { gte: cutoff },
+    },
+    include: {
+      items: {
+        include: {
+          menuItem: {
+            include: { category: true },
+          },
+          variant: true,
+          addOns: { include: { addOn: true } },
+        },
+      },
+      order: {
+        include: {
+          table: true,
+          createdBy: { select: { name: true } },
+          customer: { select: { name: true, phone: true } },
+        },
+      },
+    },
+    orderBy: { readyAt: "desc" },
+  });
+
+  return serialize(kots);
+}
+
+export async function recallKOT(kotId: string) {
+  const { restaurantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  const existing = await prisma.kOT.findUnique({
+    where: { id: kotId },
+    select: { restaurantId: true, orderId: true, status: true },
+  });
+  if (!existing || existing.restaurantId !== restaurantId) {
+    throw new Error("KOT not found");
+  }
+  if (existing.status !== "READY") {
+    throw new Error("Only ready KOTs can be recalled");
+  }
+
+  const kot = await prisma.kOT.update({
+    where: { id: kotId },
+    data: { status: "PREPARING", readyAt: null },
+  });
+
+  // If the parent order was marked READY because all KOTs were ready,
+  // bump it back to PREPARING.
+  await prisma.order.updateMany({
+    where: { id: existing.orderId, status: { in: ["READY", "SERVED"] } },
+    data: { status: "PREPARING" },
+  });
+
+  revalidatePath("/kitchen");
+  revalidatePath("/pos");
+  return serialize(kot);
+}
+
 export async function setOrderItemPrepared(itemId: string, prepared: boolean) {
   const { restaurantId } = await getTenantScope();
   if (!restaurantId) throw new Error("No restaurant selected");

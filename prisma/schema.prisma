@@ -104,6 +104,15 @@ enum WastageReason {
   OTHER
 }
 
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  SEATED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
 // ─────────────────────────── TENANT & SUBSCRIPTION ───────────────────────────
 
 model Tenant {
@@ -171,6 +180,7 @@ model Restaurant {
   wastageEntries   WastageEntry[]
   taxConfigs       TaxConfig[]
   staffAssignments StaffAssignment[]
+  reservations     Reservation[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -195,6 +205,7 @@ model User {
 
   staffAssignments StaffAssignment[]
   orders           Order[]           @relation("OrderCreatedBy")
+  reservations     Reservation[]     @relation("ReservationCreatedBy")
   sessions         Session[]
   accounts         Account[]
 
@@ -363,7 +374,8 @@ model Table {
   positionY    Int?
   createdAt    DateTime    @default(now())
 
-  orders Order[]
+  orders       Order[]
+  reservations Reservation[]
 
   @@index([restaurantId])
 }
@@ -512,6 +524,29 @@ model Customer {
 
   @@unique([tenantId, phone])
   @@index([tenantId])
+}
+
+// ─────────────────────────── RESERVATIONS ───────────────────────────
+
+model Reservation {
+  id           String            @id @default(cuid())
+  restaurantId String
+  restaurant   Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  customerName String
+  phone        String
+  partySize    Int               @default(2)
+  scheduledFor DateTime
+  tableId      String?
+  table        Table?            @relation(fields: [tableId], references: [id])
+  notes        String?
+  status       ReservationStatus @default(PENDING)
+  createdById  String
+  createdBy    User              @relation("ReservationCreatedBy", fields: [createdById], references: [id])
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([restaurantId, scheduledFor])
+  @@index([restaurantId, status])
 }
 
 // ─────────────────────────── INVENTORY ───────────────────────────

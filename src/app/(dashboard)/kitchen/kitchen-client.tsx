@@ -10,13 +10,17 @@ import {
 } from "react";
 import {
   getActiveKOTs,
+  getRecentReadyKOTs,
   updateKOTStatus,
   setOrderItemPrepared,
+  recallKOT,
 } from "@/lib/actions/kot-actions";
 
 type KOTList = Awaited<ReturnType<typeof getActiveKOTs>>;
 type KOT = KOTList[number];
 type KOTItem = KOT["items"][number];
+
+type KitchenView = "running" | "ready";
 
 type OrderGroup = {
   orderId: string;
@@ -130,8 +134,16 @@ function ReadyCheckbox({
   );
 }
 
-export function KitchenClient({ initialKOTs }: { initialKOTs: KOTList }) {
+export function KitchenClient({
+  initialKOTs,
+  initialReadyKOTs,
+}: {
+  initialKOTs: KOTList;
+  initialReadyKOTs: KOTList;
+}) {
+  const [view, setView] = useState<KitchenView>("running");
   const [kots, setKots] = useState<KOTList>(initialKOTs);
+  const [readyKots, setReadyKots] = useState<KOTList>(initialReadyKOTs);
   const [stationFilter, setStationFilter] = useState<string>("ALL");
   const [, setTick] = useState(0);
   const [isPending, startTransition] = useTransition();
@@ -152,13 +164,16 @@ export function KitchenClient({ initialKOTs }: { initialKOTs: KOTList }) {
     }));
   }
 
-  // Polling: refresh KOTs every 10 seconds (background, not via startTransition
-  // so it doesn't disable the toggle buttons).
+  // Polling: refresh both lists every 10 seconds.
   useEffect(() => {
     const id = setInterval(async () => {
       try {
-        const fresh = await getActiveKOTs();
+        const [fresh, freshReady] = await Promise.all([
+          getActiveKOTs(),
+          getRecentReadyKOTs(),
+        ]);
         setKots(mergePendingUpdates(fresh));
+        setReadyKots(freshReady);
       } catch {
         // silently ignore polling errors
       }
@@ -232,8 +247,28 @@ export function KitchenClient({ initialKOTs }: { initialKOTs: KOTList }) {
     startTransition(async () => {
       try {
         await Promise.all(kotIds.map((id) => updateKOTStatus(id, "READY")));
-        const fresh = await getActiveKOTs();
+        const [fresh, freshReady] = await Promise.all([
+          getActiveKOTs(),
+          getRecentReadyKOTs(),
+        ]);
         setKots(fresh);
+        setReadyKots(freshReady);
+      } catch {
+        // ignore
+      }
+    });
+  }, []);
+
+  const handleRecall = useCallback((kotIds: string[]) => {
+    startTransition(async () => {
+      try {
+        await Promise.all(kotIds.map((id) => recallKOT(id)));
+        const [fresh, freshReady] = await Promise.all([
+          getActiveKOTs(),
+          getRecentReadyKOTs(),
+        ]);
+        setKots(fresh);
+        setReadyKots(freshReady);
       } catch {
         // ignore
       }
@@ -241,38 +276,12 @@ export function KitchenClient({ initialKOTs }: { initialKOTs: KOTList }) {
   }, []);
 
   // Group active KOTs by order (so multiple KOTs for the same table appear in one card)
-  const orderGroups = useMemo<OrderGroup[]>(() => {
-    const map = new Map<string, OrderGroup>();
-    for (const kot of kots) {
-      const orderId = kot.order.id;
-      const existing = map.get(orderId);
-      if (existing) {
-        existing.kots.push(kot);
-        if (new Date(kot.createdAt) < new Date(existing.earliestCreatedAt)) {
-          existing.earliestCreatedAt = kot.createdAt;
-        }
-      } else {
-        map.set(orderId, {
-          orderId,
-          orderNumber: kot.order.orderNumber,
-          order: kot.order,
-          kots: [kot],
-          earliestCreatedAt: kot.createdAt,
-        });
-      }
-    }
-    // Sort each group's KOTs by createdAt ascending (oldest batch first)
-    for (const group of map.values()) {
-      group.kots.sort(
-        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-      );
-    }
-    return Array.from(map.values()).sort(
-      (a, b) =>
-        new Date(a.earliestCreatedAt).getTime() -
-        new Date(b.earliestCreatedAt).getTime()
-    );
-  }, [kots]);
+  const orderGroups = useMemo<OrderGroup[]>(() => groupKotsByOrder(kots, "asc"), [kots]);
+  // Ready KOTs grouped by order, newest-ready first
+  const readyOrderGroups = useMemo<OrderGroup[]>(
+    () => groupKotsByOrder(readyKots, "desc"),
+    [readyKots]
+  );
 
   const handleItemToggle = useCallback(
     (kotId: string, itemId: string, nextPrepared: boolean) => {
@@ -347,6 +356,31 @@ export function KitchenClient({ initialKOTs }: { initialKOTs: KOTList }) {
             <span className="text-on-surface font-black">{avgMinutes}m</span>
           </span>
         </div>
+
+        {/* View tabs */}
+        <div className="flex items-center bg-surface-container rounded-lg p-1">
+          <button
+            onClick={() => setView("running")}
+            className={`px-4 py-1.5 rounded-md text-xs font-black uppercase tracking-wider transition-colors ${
+              view === "running"
+                ? "bg-primary text-on-primary shadow"
+                : "text-on-surface-variant hover:text-on-surface"
+            }`}
+          >
+            Running ({kots.length})
+          </button>
+          <button
+            onClick={() => setView("ready")}
+            className={`px-4 py-1.5 rounded-md text-xs font-black uppercase tracking-wider transition-colors ${
+              view === "ready"
+                ? "bg-green-600 text-white shadow"
+                : "text-on-surface-variant hover:text-on-surface"
+            }`}
+          >
+            Ready · Recall ({readyKots.length})
+          </button>
+        </div>
+
         <div className="flex items-center gap-2 text-sm font-bold text-green-600">
           <span className="relative flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75" />
@@ -358,7 +392,8 @@ export function KitchenClient({ initialKOTs }: { initialKOTs: KOTList }) {
 
       {/* ── Main: sidebar + grid ── */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: aggregated pending items + station filter */}
+        {/* Left: station filter (running view only) */}
+        {view === "running" && (
         <aside className="w-[260px] shrink-0 border-r border-outline-variant/20 bg-surface-container-lowest overflow-y-auto">
           <div className="px-3 pt-3 pb-2 border-b border-outline-variant/15">
             <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/60 px-2 mb-2">
@@ -420,48 +455,106 @@ export function KitchenClient({ initialKOTs }: { initialKOTs: KOTList }) {
               ))
           )}
         </aside>
+        )}
 
         {/* Right: Order card grid */}
         <div className="flex-1 overflow-y-auto p-6 bg-surface">
-          {orderGroups.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-on-surface-variant font-semibold text-lg">
-              <span className="material-symbols-outlined text-4xl mr-3 opacity-40">
-                restaurant
+          {view === "running" ? (
+            orderGroups.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-on-surface-variant font-semibold text-lg">
+                <span className="material-symbols-outlined text-4xl mr-3 opacity-40">
+                  restaurant
+                </span>
+                No active orders
+              </div>
+            ) : (
+              <div className="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))]">
+                {orderGroups
+                  .map((group) => ({
+                    group,
+                    visibleKots: group.kots
+                      .map((kot) => ({
+                        ...kot,
+                        items: kot.items.filter(
+                          (item) =>
+                            stationFilter === "ALL" ||
+                            item.menuItem.category.name === stationFilter
+                        ),
+                      }))
+                      .filter((kot) => kot.items.length > 0),
+                  }))
+                  .filter(({ visibleKots }) => visibleKots.length > 0)
+                  .map(({ group, visibleKots }) => (
+                    <OrderCard
+                      key={group.orderId}
+                      group={{ ...group, kots: visibleKots }}
+                      isPending={isPending}
+                      onItemToggle={handleItemToggle}
+                      onOrderReady={handleOrderReady}
+                    />
+                  ))}
+              </div>
+            )
+          ) : readyOrderGroups.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-on-surface-variant font-semibold text-lg gap-2">
+              <span className="material-symbols-outlined text-4xl opacity-40">
+                done_all
               </span>
-              No active orders
+              No recently ready orders
+              <span className="text-xs font-medium text-on-surface-variant/60">
+                Showing the last 4 hours · marking Food Ready will land here
+              </span>
             </div>
           ) : (
             <div className="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))]">
-              {orderGroups
-                .map((group) => ({
-                  group,
-                  visibleKots: group.kots
-                    .map((kot) => ({
-                      ...kot,
-                      items: kot.items.filter(
-                        (item) =>
-                          stationFilter === "ALL" ||
-                          item.menuItem.category.name === stationFilter
-                      ),
-                    }))
-                    .filter((kot) => kot.items.length > 0),
-                }))
-                .filter(({ visibleKots }) => visibleKots.length > 0)
-                .map(({ group, visibleKots }) => (
-                  <OrderCard
-                    key={group.orderId}
-                    group={{ ...group, kots: visibleKots }}
-                    isPending={isPending}
-                    onItemToggle={handleItemToggle}
-                    onOrderReady={handleOrderReady}
-                  />
-                ))}
+              {readyOrderGroups.map((group) => (
+                <ReadyCard
+                  key={group.orderId}
+                  group={group}
+                  isPending={isPending}
+                  onRecall={handleRecall}
+                />
+              ))}
             </div>
           )}
         </div>
       </div>
     </div>
   );
+}
+
+function groupKotsByOrder(kots: KOTList, direction: "asc" | "desc"): OrderGroup[] {
+  const map = new Map<string, OrderGroup>();
+  for (const kot of kots) {
+    const orderId = kot.order.id;
+    const existing = map.get(orderId);
+    if (existing) {
+      existing.kots.push(kot);
+      if (new Date(kot.createdAt) < new Date(existing.earliestCreatedAt)) {
+        existing.earliestCreatedAt = kot.createdAt;
+      }
+    } else {
+      map.set(orderId, {
+        orderId,
+        orderNumber: kot.order.orderNumber,
+        order: kot.order,
+        kots: [kot],
+        earliestCreatedAt: kot.createdAt,
+      });
+    }
+  }
+  for (const group of map.values()) {
+    group.kots.sort(
+      (a, b) =>
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    const diff =
+      new Date(a.earliestCreatedAt).getTime() -
+      new Date(b.earliestCreatedAt).getTime();
+    return direction === "asc" ? diff : -diff;
+  });
 }
 
 function itemSignature(item: KOTItem): string {
@@ -670,6 +763,109 @@ function OrderCard({
           } disabled:opacity-50`}
         >
           Food Ready
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function readyAgeMinutes(readyAt: Date | string | null | undefined): number {
+  if (!readyAt) return 0;
+  return Math.max(0, Math.floor((Date.now() - new Date(readyAt).getTime()) / 60_000));
+}
+
+function ReadyCard({
+  group,
+  isPending,
+  onRecall,
+}: {
+  group: OrderGroup;
+  isPending: boolean;
+  onRecall: (kotIds: string[]) => void;
+}) {
+  const meta = orderTypeMeta(
+    group.order.type,
+    group.order.table?.name,
+    group.order.customer?.name
+  );
+  const biller = group.order.createdBy?.name ?? "—";
+  // Use the most recent readyAt across this order's KOTs as the "ready X ago" stamp
+  const latestReadyAt = group.kots.reduce<Date | null>((latest, k) => {
+    if (!k.readyAt) return latest;
+    const t = new Date(k.readyAt);
+    return latest && latest.getTime() >= t.getTime() ? latest : t;
+  }, null);
+  const minutesAgo = readyAgeMinutes(latestReadyAt);
+
+  return (
+    <div className="flex flex-col bg-surface-container-lowest rounded-xl shadow border-l-[5px] border-l-green-500 border border-outline-variant/20 overflow-hidden">
+      {/* Ready pill */}
+      <div className="flex justify-center -mb-2 pt-3">
+        <span className="bg-green-100 text-green-700 text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-md">
+          Ready · {minutesAgo}m ago
+        </span>
+      </div>
+
+      {/* Header */}
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2">
+        <span className="font-headline text-xl font-extrabold text-on-surface">
+          #{group.orderNumber}
+        </span>
+        <div className={`flex flex-col items-end text-xs font-bold ${meta.color}`}>
+          <span className="flex items-center gap-1">
+            {meta.label}
+            <span className="material-symbols-outlined text-base">{meta.icon}</span>
+          </span>
+          {meta.sub && (
+            <span className="text-on-surface-variant font-semibold">{meta.sub}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="px-4 pb-2 text-xs font-semibold text-on-surface-variant border-b border-outline-variant/15">
+        Biller: <span className="text-on-surface">{biller}</span>
+      </div>
+
+      {/* Items (read-only) */}
+      <div className="flex-1 px-4 py-3 space-y-2.5 max-h-[320px] overflow-y-auto">
+        {group.kots.flatMap((kot) =>
+          groupKotItems(kot.items).map((ig) => {
+            const rep = ig.representative;
+            const name =
+              rep.menuItem.name +
+              (rep.variant ? ` (${rep.variant.name})` : "");
+            return (
+              <div key={`${kot.id}-${ig.signature}`} className="opacity-90">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-xs font-black text-on-surface-variant tabular-nums w-7 text-right shrink-0">
+                    {ig.totalQty}x
+                  </span>
+                  <VegDot isVeg={rep.menuItem.isVeg} />
+                  <span className="flex-1 min-w-0 truncate text-sm font-medium text-on-surface line-through">
+                    {name}
+                  </span>
+                </div>
+                {rep.notes && (
+                  <p className="ml-12 mt-0.5 text-[11px] italic font-semibold text-primary">
+                    Note: {rep.notes}
+                  </p>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Recall button */}
+      <div className="px-3 pb-3">
+        <button
+          disabled={isPending}
+          onClick={() => onRecall(group.kots.map((k) => k.id))}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-black uppercase tracking-wide bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 disabled:opacity-50 transition-all"
+          title="Push this order back to the running queue"
+        >
+          <span className="material-symbols-outlined text-base">undo</span>
+          Recall
         </button>
       </div>
     </div>

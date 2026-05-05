@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 const topNavLinks = [
   { title: "Floor Map", href: "/pos" },
   { title: "Quick Pay", href: "/orders" },
-  { title: "Reservation", href: "/customers" },
+  { title: "Reservation", href: "/reservations" },
 ];
 
 export function Topbar() {

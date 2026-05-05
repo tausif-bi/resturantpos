@@ -49,6 +49,12 @@ const navItems: NavItem[] = [
     permission: "view_kot",
   },
   {
+    title: "Reservations",
+    href: "/reservations",
+    icon: "event_available",
+    permission: "manage_reservations",
+  },
+  {
     title: "Inventory",
     href: "/inventory",
     icon: "inventory_2",
