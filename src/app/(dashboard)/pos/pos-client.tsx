@@ -14,6 +14,7 @@ import { createKOT } from "@/lib/actions/kot-actions";
 import { createPayment } from "@/lib/actions/payment-actions";
 import { CustomerDetailsDialog } from "./customer-details-dialog";
 import { formatPhone } from "@/lib/validators/customer";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 type TableWithOrders = Awaited<
   ReturnType<typeof import("@/lib/actions/table-actions").getTablesWithActiveOrders>
@@ -48,8 +49,18 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
   const [search, setSearch] = useState("");
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null);
+  const [cartSheetOpen, setCartSheetOpen] = useState(false);
   const [, setTick] = useState(0);
   const [isPending, startTransition] = useTransition();
+
+  // Open the laptop cart slide-over only on screens below the 2xl breakpoint;
+  // on desktop the docked cart is always visible so this is a no-op.
+  function openCartSheetIfLaptop() {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia("(max-width: 1535.98px)").matches) {
+      setCartSheetOpen(true);
+    }
+  }
 
   // 1-second tick so the per-item "added X ago" labels stay live.
   useEffect(() => {
@@ -123,6 +134,7 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
       try {
         await createOrder({ tableId, type: "DINE_IN" });
         setSelectedTableId(tableId);
+        openCartSheetIfLaptop();
         toast.success("Table seated — order created");
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to seat table");
@@ -241,6 +253,335 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
   const orderTypeLabel =
     orderType === "DINE_IN" ? "Dine In" : orderType === "TAKEAWAY" ? "Pick Up" : "Delivery";
 
+  // Cart panel content — rendered both as the docked column on desktop (≥2xl)
+  // and inside a slide-over Sheet on laptops (<2xl).
+  const cartContent = activeOrder ? (
+    <>
+      {/* Header */}
+      <div className="p-6 border-b border-outline-variant/20">
+        <p className="text-[10px] font-black text-secondary uppercase tracking-[0.2em] mb-1">
+          Current Active Order
+        </p>
+        <div className="flex items-center justify-between">
+          <h2 className="font-headline text-2xl font-extrabold text-on-surface">
+            {orderType === "DINE_IN"
+              ? selectedTable?.name
+              : (nonDineActiveOrder?.customer?.name ?? orderTypeLabel)}
+          </h2>
+          <span className="bg-primary/10 text-primary text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest">
+            {activeOrder.type.replace("_", " ")}
+          </span>
+        </div>
+        <p className="text-xs text-secondary mt-1">
+          {activeOrder.orderNumber} · Server: {activeOrder.createdBy.name}
+        </p>
+        {nonDineActiveOrder?.customer && (
+          <div className="mt-3 pt-3 border-t border-outline-variant/20 space-y-1">
+            <div className="flex items-center gap-1.5 text-xs text-on-surface">
+              <span className="material-symbols-outlined text-sm text-secondary">call</span>
+              <span className="font-mono font-semibold">{formatPhone(nonDineActiveOrder.customer.phone)}</span>
+            </div>
+            {nonDineActiveOrder.customer.locality && (
+              <div className="flex items-center gap-1.5 text-xs text-secondary">
+                <span className="material-symbols-outlined text-sm">location_on</span>
+                <span className="font-medium">{nonDineActiveOrder.customer.locality}</span>
+              </div>
+            )}
+            {nonDineActiveOrder.customer.address && (
+              <p className="text-[11px] text-secondary italic pl-5">
+                {nonDineActiveOrder.customer.address}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Item Search */}
+      <div className="px-6 pt-4 pb-3 border-b border-outline-variant/20 relative">
+        <div className="flex items-center gap-2 bg-surface-container-lowest rounded-xl px-3 py-2 shadow-sm">
+          <span className="material-symbols-outlined text-secondary text-lg">search</span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Add item — type name or short code (e.g. VMS)"
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-stone-400"
+            autoComplete="off"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="text-secondary hover:text-on-surface"
+              title="Clear"
+            >
+              <span className="material-symbols-outlined text-base">close</span>
+            </button>
+          )}
+        </div>
+        {search.length > 0 && (
+          <div className="absolute left-6 right-6 mt-1 bg-white border border-outline-variant/30 rounded-xl shadow-xl z-30 max-h-80 overflow-y-auto">
+            {searchResults.length === 0 ? (
+              <p className="p-3 text-xs text-secondary text-center italic">
+                No items match &quot;{search}&quot;
+              </p>
+            ) : (
+              searchResults.map((item) => (
+                <div
+                  key={item.id}
+                  className="px-3 py-2 hover:bg-surface-container-low cursor-pointer border-b border-outline-variant/10 last:border-b-0"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {item.isVeg ? (
+                        <span className="w-3 h-3 border border-green-600 flex items-center justify-center rounded-sm shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-600" />
+                        </span>
+                      ) : (
+                        <span className="w-3 h-3 border border-red-600 flex items-center justify-center rounded-sm shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-600" />
+                        </span>
+                      )}
+                      <span className="text-sm font-semibold text-on-surface truncate">
+                        {item.name}
+                      </span>
+                      {item.shortCode && (
+                        <span className="text-[9px] font-mono font-bold text-secondary bg-surface-container px-1.5 py-0.5 rounded shrink-0">
+                          {item.shortCode}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs font-black text-primary shrink-0">
+                      {formatCurrency(item.basePrice.toString())}
+                    </span>
+                  </div>
+                  {item.variants.length > 0 ? (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {item.variants.map((v) => (
+                        <button
+                          key={v.id}
+                          onClick={() => handleAddItem(item, v.id)}
+                          disabled={isPending}
+                          className="px-2 py-0.5 bg-surface-container-high text-[10px] font-bold rounded hover:bg-primary hover:text-on-primary transition-all disabled:opacity-50"
+                        >
+                          {v.name} · {formatCurrency(v.price.toString())}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleAddItem(item)}
+                      disabled={isPending}
+                      className="mt-1.5 text-[10px] font-bold text-tertiary hover:underline disabled:opacity-50"
+                    >
+                      + Add to order
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Items */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-3">
+        {activeOrder.orderItems.length === 0 ? (
+          <div className="text-center py-8 text-secondary">
+            <span className="material-symbols-outlined text-3xl text-stone-300">restaurant_menu</span>
+            <p className="text-sm mt-2">No items yet. Search above or open the menu.</p>
+          </div>
+        ) : (
+          activeOrder.orderItems.map((item) => (
+            <div
+              key={item.id}
+              className={`flex gap-3 bg-surface-container-lowest p-3 rounded-xl ${
+                !item.kotId ? "border-l-4 border-primary" : ""
+              }`}
+            >
+              <div className="h-12 w-12 rounded-lg bg-stone-100 flex-shrink-0 flex items-center justify-center">
+                <span className="material-symbols-outlined text-stone-400 text-lg">lunch_dining</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-bold text-on-surface truncate">{item.menuItem.name}</p>
+                  <p className="text-sm font-black text-on-surface shrink-0">
+                    {formatCurrency(item.totalPrice.toString())}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] mt-0.5">
+                  {item.variant && (
+                    <span className="text-tertiary font-semibold">{item.variant.name}</span>
+                  )}
+                  <span className="flex items-center gap-0.5 text-secondary">
+                    <span className="material-symbols-outlined text-[11px]">schedule</span>
+                    {formatRelativeShort(item.createdAt)}
+                  </span>
+                  {!item.kotId ? (
+                    <span className="text-primary font-black uppercase">Unsent</span>
+                  ) : (
+                    <span className="text-green-700 font-black uppercase">Sent</span>
+                  )}
+                </div>
+                {item.notes && (
+                  <p className="text-[10px] text-secondary italic truncate">{item.notes}</p>
+                )}
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <QuantityInput
+                    value={item.quantity}
+                    disabled={isPending}
+                    onCommit={(next) => handleUpdateQty(item.id, next)}
+                  />
+                  <button
+                    onClick={() => handleUpdateQty(item.id, 0)}
+                    disabled={isPending}
+                    className="h-6 w-6 rounded-md bg-surface-container-highest text-secondary flex items-center justify-center hover:bg-error/10 hover:text-error transition-colors disabled:opacity-50"
+                    title="Remove item"
+                    aria-label="Remove item"
+                  >
+                    <span className="material-symbols-outlined text-sm">close</span>
+                  </button>
+                  {!item.kotId && (
+                    <button
+                      onClick={() => handleSendItemKOT(item.id, item.menuItem.name)}
+                      disabled={isPending}
+                      className="ml-auto flex items-center gap-1 px-2 h-6 rounded-md bg-primary/10 text-primary hover:bg-primary hover:text-on-primary text-[10px] font-bold uppercase tracking-wide transition-colors disabled:opacity-50"
+                      title="Fire this item to the kitchen now"
+                    >
+                      <span className="material-symbols-outlined text-[12px]">send</span>
+                      Send
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Billing Footer */}
+      <div className="border-t border-outline-variant/20 p-6 space-y-4">
+        <div className="space-y-2">
+          <div className="flex justify-between text-xs">
+            <span className="text-secondary">Subtotal</span>
+            <span className="font-semibold text-on-surface">{formatCurrency(subtotal)}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-secondary">Tax</span>
+            <span className="font-semibold text-on-surface">{formatCurrency(taxAmount)}</span>
+          </div>
+          {discount > 0 && (
+            <div className="flex justify-between text-xs">
+              <span className="text-secondary">Discount</span>
+              <span className="font-semibold text-tertiary">-{formatCurrency(discount)}</span>
+            </div>
+          )}
+          <div className="border-t border-outline-variant/20 pt-2 flex justify-between items-center">
+            <span className="text-sm font-bold text-on-surface">Total</span>
+            <span className="font-headline text-2xl font-black text-on-surface">
+              {formatCurrency(totalAmount)}
+            </span>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={handleSendKOT}
+            disabled={isPending || unsentItems.length === 0}
+            className={`flex items-center justify-center gap-1.5 text-xs font-bold py-2.5 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+              unsentItems.length > 0
+                ? "primary-gradient text-white shadow hover:shadow-md"
+                : "bg-surface-container-highest text-on-surface"
+            }`}
+          >
+            <span className="material-symbols-outlined text-sm">print</span>
+            Send KOT ({unsentItems.length})
+          </button>
+          <button
+            onClick={handleCancelOrder}
+            disabled={isPending}
+            className="flex items-center justify-center gap-1.5 bg-surface-container-highest text-error text-xs font-bold py-2.5 rounded-lg hover:bg-error/10 transition-colors disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-sm">cancel</span>
+            Cancel
+          </button>
+        </div>
+
+        {/* Payment Methods (select one, then settle) */}
+        <div className="flex gap-2">
+          {(["CASH", "CARD", "UPI"] as const).map((mode) => {
+            const selected = paymentMode === mode;
+            return (
+              <button
+                key={mode}
+                onClick={() =>
+                  setPaymentMode(selected ? null : mode)
+                }
+                disabled={isPending || totalAmount <= 0}
+                className={`flex-1 flex flex-col items-center gap-1 border py-2.5 rounded-lg transition-all disabled:opacity-40 relative ${
+                  selected
+                    ? "bg-primary/10 border-primary text-primary shadow-sm"
+                    : "bg-surface-container-lowest border-outline-variant/30 text-secondary hover:text-primary hover:border-primary/30"
+                }`}
+                aria-pressed={selected}
+              >
+                <span
+                  className={`absolute top-1.5 right-1.5 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                    selected
+                      ? "bg-primary border-primary"
+                      : "bg-white border-outline-variant/50"
+                  }`}
+                >
+                  {selected && (
+                    <span className="material-symbols-outlined text-white text-[12px] leading-none font-black">
+                      check
+                    </span>
+                  )}
+                </span>
+                <span className="material-symbols-outlined text-lg">
+                  {mode === "CASH"
+                    ? "payments"
+                    : mode === "CARD"
+                      ? "credit_card"
+                      : "qr_code_2"}
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-wider">
+                  {mode}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          onClick={handleSettle}
+          disabled={isPending || totalAmount <= 0 || !paymentMode}
+          className="w-full primary-gradient text-on-primary font-bold py-3.5 rounded-xl text-sm shadow-lg hover:shadow-xl active:scale-[0.99] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <span className="material-symbols-outlined text-lg">
+            check_circle
+          </span>
+          {paymentMode
+            ? `Settle ${paymentMode} — ${formatCurrency(totalAmount)}`
+            : `Select payment method to settle`}
+        </button>
+      </div>
+    </>
+  ) : (
+    <div className="flex-1 flex items-center justify-center text-center p-8">
+      <div>
+        <span className="material-symbols-outlined text-5xl text-stone-300">point_of_sale</span>
+        <p className="font-headline font-bold text-on-surface mt-4">
+          {orderType === "DINE_IN" ? "No Table Selected" : `No ${orderTypeLabel} Order Selected`}
+        </p>
+        <p className="text-sm text-secondary mt-1">
+          {orderType === "DINE_IN"
+            ? "Select an occupied table to view its order, or tap an available table to seat guests."
+            : `Click "New ${orderTypeLabel} Order" to start billing, or select an existing order from the queue.`}
+        </p>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex gap-0 -m-8 h-[calc(100vh-4rem)]">
       {/* LEFT — Floor Map / Order Queue / Menu Selector */}
@@ -275,7 +616,10 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
                 tables={tables}
                 selectedTableId={selectedTableId}
                 isPending={isPending}
-                onSelectTable={(id) => setSelectedTableId(id)}
+                onSelectTable={(id) => {
+                  setSelectedTableId(id);
+                  openCartSheetIfLaptop();
+                }}
                 onSeat={handleSeatTable}
                 onOpenMenu={(id) => {
                   setSelectedTableId(id);
@@ -289,7 +633,10 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
                 orders={nonDineOrders.filter((o) => o.type === orderType)}
                 selectedOrderId={selectedOrderId}
                 isPending={isPending}
-                onSelect={(id) => setSelectedOrderId(id)}
+                onSelect={(id) => {
+                  setSelectedOrderId(id);
+                  openCartSheetIfLaptop();
+                }}
                 onStart={handleStartNonDineOrder}
               />
             )}
@@ -438,334 +785,38 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
         )}
       </div>
 
-      {/* RIGHT — Order Sidebar */}
-      <div className="w-[440px] bg-surface-container border-l border-outline-variant/30 shadow-[-4px_0_24px_rgba(0,0,0,0.06)] flex flex-col">
-        {activeOrder ? (
-          <>
-            {/* Header */}
-            <div className="p-6 border-b border-outline-variant/20">
-              <p className="text-[10px] font-black text-secondary uppercase tracking-[0.2em] mb-1">
-                Current Active Order
-              </p>
-              <div className="flex items-center justify-between">
-                <h2 className="font-headline text-2xl font-extrabold text-on-surface">
-                  {orderType === "DINE_IN"
-                    ? selectedTable?.name
-                    : (nonDineActiveOrder?.customer?.name ?? orderTypeLabel)}
-                </h2>
-                <span className="bg-primary/10 text-primary text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest">
-                  {activeOrder.type.replace("_", " ")}
-                </span>
-              </div>
-              <p className="text-xs text-secondary mt-1">
-                {activeOrder.orderNumber} · Server: {activeOrder.createdBy.name}
-              </p>
-              {nonDineActiveOrder?.customer && (
-                <div className="mt-3 pt-3 border-t border-outline-variant/20 space-y-1">
-                  <div className="flex items-center gap-1.5 text-xs text-on-surface">
-                    <span className="material-symbols-outlined text-sm text-secondary">call</span>
-                    <span className="font-mono font-semibold">{formatPhone(nonDineActiveOrder.customer.phone)}</span>
-                  </div>
-                  {nonDineActiveOrder.customer.locality && (
-                    <div className="flex items-center gap-1.5 text-xs text-secondary">
-                      <span className="material-symbols-outlined text-sm">location_on</span>
-                      <span className="font-medium">{nonDineActiveOrder.customer.locality}</span>
-                    </div>
-                  )}
-                  {nonDineActiveOrder.customer.address && (
-                    <p className="text-[11px] text-secondary italic pl-5">
-                      {nonDineActiveOrder.customer.address}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
+      {/* RIGHT — Cart panel (docked column, desktop ≥1536px only) */}
+      <div className="hidden 2xl:flex w-[440px] bg-surface-container border-l border-outline-variant/30 shadow-[-4px_0_24px_rgba(0,0,0,0.06)] flex-col">
+        {cartContent}
+      </div>
 
-            {/* Item Search */}
-            <div className="px-6 pt-4 pb-3 border-b border-outline-variant/20 relative">
-              <div className="flex items-center gap-2 bg-surface-container-lowest rounded-xl px-3 py-2 shadow-sm">
-                <span className="material-symbols-outlined text-secondary text-lg">search</span>
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Add item — type name or short code (e.g. VMS)"
-                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-stone-400"
-                  autoComplete="off"
-                />
-                {search && (
-                  <button
-                    onClick={() => setSearch("")}
-                    className="text-secondary hover:text-on-surface"
-                    title="Clear"
-                  >
-                    <span className="material-symbols-outlined text-base">close</span>
-                  </button>
-                )}
-              </div>
-              {search.length > 0 && (
-                <div className="absolute left-6 right-6 mt-1 bg-white border border-outline-variant/30 rounded-xl shadow-xl z-30 max-h-80 overflow-y-auto">
-                  {searchResults.length === 0 ? (
-                    <p className="p-3 text-xs text-secondary text-center italic">
-                      No items match &quot;{search}&quot;
-                    </p>
-                  ) : (
-                    searchResults.map((item) => (
-                      <div
-                        key={item.id}
-                        className="px-3 py-2 hover:bg-surface-container-low cursor-pointer border-b border-outline-variant/10 last:border-b-0"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            {item.isVeg ? (
-                              <span className="w-3 h-3 border border-green-600 flex items-center justify-center rounded-sm shrink-0">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-600" />
-                              </span>
-                            ) : (
-                              <span className="w-3 h-3 border border-red-600 flex items-center justify-center rounded-sm shrink-0">
-                                <span className="w-1.5 h-1.5 rounded-full bg-red-600" />
-                              </span>
-                            )}
-                            <span className="text-sm font-semibold text-on-surface truncate">
-                              {item.name}
-                            </span>
-                            {item.shortCode && (
-                              <span className="text-[9px] font-mono font-bold text-secondary bg-surface-container px-1.5 py-0.5 rounded shrink-0">
-                                {item.shortCode}
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-xs font-black text-primary shrink-0">
-                            {formatCurrency(item.basePrice.toString())}
-                          </span>
-                        </div>
-                        {item.variants.length > 0 ? (
-                          <div className="flex flex-wrap gap-1 mt-1.5">
-                            {item.variants.map((v) => (
-                              <button
-                                key={v.id}
-                                onClick={() => handleAddItem(item, v.id)}
-                                disabled={isPending}
-                                className="px-2 py-0.5 bg-surface-container-high text-[10px] font-bold rounded hover:bg-primary hover:text-on-primary transition-all disabled:opacity-50"
-                              >
-                                {v.name} · {formatCurrency(v.price.toString())}
-                              </button>
-                            ))}
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => handleAddItem(item)}
-                            disabled={isPending}
-                            className="mt-1.5 text-[10px] font-bold text-tertiary hover:underline disabled:opacity-50"
-                          >
-                            + Add to order
-                          </button>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Items */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-3">
-              {activeOrder.orderItems.length === 0 ? (
-                <div className="text-center py-8 text-secondary">
-                  <span className="material-symbols-outlined text-3xl text-stone-300">restaurant_menu</span>
-                  <p className="text-sm mt-2">No items yet. Search above or open the menu.</p>
-                </div>
-              ) : (
-                activeOrder.orderItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`flex gap-3 bg-surface-container-lowest p-3 rounded-xl ${
-                      !item.kotId ? "border-l-4 border-primary" : ""
-                    }`}
-                  >
-                    <div className="h-12 w-12 rounded-lg bg-stone-100 flex-shrink-0 flex items-center justify-center">
-                      <span className="material-symbols-outlined text-stone-400 text-lg">lunch_dining</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-bold text-on-surface truncate">{item.menuItem.name}</p>
-                        <p className="text-sm font-black text-on-surface shrink-0">
-                          {formatCurrency(item.totalPrice.toString())}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 text-[10px] mt-0.5">
-                        {item.variant && (
-                          <span className="text-tertiary font-semibold">{item.variant.name}</span>
-                        )}
-                        <span className="flex items-center gap-0.5 text-secondary">
-                          <span className="material-symbols-outlined text-[11px]">schedule</span>
-                          {formatRelativeShort(item.createdAt)}
-                        </span>
-                        {!item.kotId ? (
-                          <span className="text-primary font-black uppercase">Unsent</span>
-                        ) : (
-                          <span className="text-green-700 font-black uppercase">Sent</span>
-                        )}
-                      </div>
-                      {item.notes && (
-                        <p className="text-[10px] text-secondary italic truncate">{item.notes}</p>
-                      )}
-                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        <QuantityInput
-                          value={item.quantity}
-                          disabled={isPending}
-                          onCommit={(next) => handleUpdateQty(item.id, next)}
-                        />
-                        <button
-                          onClick={() => handleUpdateQty(item.id, 0)}
-                          disabled={isPending}
-                          className="h-6 w-6 rounded-md bg-surface-container-highest text-secondary flex items-center justify-center hover:bg-error/10 hover:text-error transition-colors disabled:opacity-50"
-                          title="Remove item"
-                          aria-label="Remove item"
-                        >
-                          <span className="material-symbols-outlined text-sm">close</span>
-                        </button>
-                        {!item.kotId && (
-                          <button
-                            onClick={() => handleSendItemKOT(item.id, item.menuItem.name)}
-                            disabled={isPending}
-                            className="ml-auto flex items-center gap-1 px-2 h-6 rounded-md bg-primary/10 text-primary hover:bg-primary hover:text-on-primary text-[10px] font-bold uppercase tracking-wide transition-colors disabled:opacity-50"
-                            title="Fire this item to the kitchen now"
-                          >
-                            <span className="material-symbols-outlined text-[12px]">send</span>
-                            Send
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Billing Footer */}
-            <div className="border-t border-outline-variant/20 p-6 space-y-4">
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs">
-                  <span className="text-secondary">Subtotal</span>
-                  <span className="font-semibold text-on-surface">{formatCurrency(subtotal)}</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-secondary">Tax</span>
-                  <span className="font-semibold text-on-surface">{formatCurrency(taxAmount)}</span>
-                </div>
-                {discount > 0 && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-secondary">Discount</span>
-                    <span className="font-semibold text-tertiary">-{formatCurrency(discount)}</span>
-                  </div>
-                )}
-                <div className="border-t border-outline-variant/20 pt-2 flex justify-between items-center">
-                  <span className="text-sm font-bold text-on-surface">Total</span>
-                  <span className="font-headline text-2xl font-black text-on-surface">
-                    {formatCurrency(totalAmount)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={handleSendKOT}
-                  disabled={isPending || unsentItems.length === 0}
-                  className={`flex items-center justify-center gap-1.5 text-xs font-bold py-2.5 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-                    unsentItems.length > 0
-                      ? "primary-gradient text-white shadow hover:shadow-md"
-                      : "bg-surface-container-highest text-on-surface"
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-sm">print</span>
-                  Send KOT ({unsentItems.length})
-                </button>
-                <button
-                  onClick={handleCancelOrder}
-                  disabled={isPending}
-                  className="flex items-center justify-center gap-1.5 bg-surface-container-highest text-error text-xs font-bold py-2.5 rounded-lg hover:bg-error/10 transition-colors disabled:opacity-40"
-                >
-                  <span className="material-symbols-outlined text-sm">cancel</span>
-                  Cancel
-                </button>
-              </div>
-
-              {/* Payment Methods (select one, then settle) */}
-              <div className="flex gap-2">
-                {(["CASH", "CARD", "UPI"] as const).map((mode) => {
-                  const selected = paymentMode === mode;
-                  return (
-                    <button
-                      key={mode}
-                      onClick={() =>
-                        setPaymentMode(selected ? null : mode)
-                      }
-                      disabled={isPending || totalAmount <= 0}
-                      className={`flex-1 flex flex-col items-center gap-1 border py-2.5 rounded-lg transition-all disabled:opacity-40 relative ${
-                        selected
-                          ? "bg-primary/10 border-primary text-primary shadow-sm"
-                          : "bg-surface-container-lowest border-outline-variant/30 text-secondary hover:text-primary hover:border-primary/30"
-                      }`}
-                      aria-pressed={selected}
-                    >
-                      <span
-                        className={`absolute top-1.5 right-1.5 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                          selected
-                            ? "bg-primary border-primary"
-                            : "bg-white border-outline-variant/50"
-                        }`}
-                      >
-                        {selected && (
-                          <span className="material-symbols-outlined text-white text-[12px] leading-none font-black">
-                            check
-                          </span>
-                        )}
-                      </span>
-                      <span className="material-symbols-outlined text-lg">
-                        {mode === "CASH"
-                          ? "payments"
-                          : mode === "CARD"
-                            ? "credit_card"
-                            : "qr_code_2"}
-                      </span>
-                      <span className="text-[10px] font-bold uppercase tracking-wider">
-                        {mode}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <button
-                onClick={handleSettle}
-                disabled={isPending || totalAmount <= 0 || !paymentMode}
-                className="w-full primary-gradient text-on-primary font-bold py-3.5 rounded-xl text-sm shadow-lg hover:shadow-xl active:scale-[0.99] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <span className="material-symbols-outlined text-lg">
-                  check_circle
-                </span>
-                {paymentMode
-                  ? `Settle ${paymentMode} — ${formatCurrency(totalAmount)}`
-                  : `Select payment method to settle`}
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-center p-8">
-            <div>
-              <span className="material-symbols-outlined text-5xl text-stone-300">point_of_sale</span>
-              <p className="font-headline font-bold text-on-surface mt-4">
-                {orderType === "DINE_IN" ? "No Table Selected" : `No ${orderTypeLabel} Order Selected`}
-              </p>
-              <p className="text-sm text-secondary mt-1">
-                {orderType === "DINE_IN"
-                  ? "Select an occupied table to view its order, or tap an available table to seat guests."
-                  : `Click \"New ${orderTypeLabel} Order\" to start billing, or select an existing order from the queue.`}
-              </p>
-            </div>
-          </div>
+      {/* Floating cart button + slide-over (laptop / smaller screens, <1536px) */}
+      <div className="2xl:hidden">
+        {activeOrder && (
+          <button
+            type="button"
+            onClick={() => setCartSheetOpen(true)}
+            className="fixed bottom-6 right-6 z-40 primary-gradient text-on-primary rounded-full shadow-xl px-5 h-14 flex items-center gap-2 active:scale-95 transition-transform"
+          >
+            <span className="material-symbols-outlined">shopping_cart</span>
+            <span className="font-bold text-sm">
+              Cart ({activeOrder.orderItems.length})
+            </span>
+            <span className="font-black text-sm">· {formatCurrency(totalAmount)}</span>
+          </button>
         )}
+        <Sheet
+          open={cartSheetOpen && Boolean(activeOrder)}
+          onOpenChange={setCartSheetOpen}
+        >
+          <SheetContent
+            side="right"
+            className="w-[92vw] sm:!max-w-[480px] !p-0 bg-surface-container flex flex-col"
+          >
+            <SheetTitle className="sr-only">Current Active Order</SheetTitle>
+            {cartContent}
+          </SheetContent>
+        </Sheet>
       </div>
 
       {orderType !== "DINE_IN" && (
@@ -773,7 +824,10 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
           open={customerDialogOpen}
           orderType={orderType}
           onOpenChange={setCustomerDialogOpen}
-          onCreated={(id) => setSelectedOrderId(id)}
+          onCreated={(id) => {
+            setSelectedOrderId(id);
+            openCartSheetIfLaptop();
+          }}
         />
       )}
     </div>
