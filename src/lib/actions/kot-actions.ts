@@ -33,7 +33,13 @@ export async function createKOT(orderId: string, orderItemIds: string[]) {
       data: { kotId: newKOT.id },
     });
 
-    // Update order status to CONFIRMED if currently PENDING
+    // Stamp printedAt on first KOT (drives the "Printed" row tint on /orders).
+    await tx.order.update({
+      where: { id: orderId },
+      data: { printedAt: new Date() },
+    });
+
+    // Bump PENDING → CONFIRMED.
     await tx.order.updateMany({
       where: { id: orderId, status: "PENDING" },
       data: { status: "CONFIRMED" },

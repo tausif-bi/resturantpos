@@ -277,6 +277,97 @@ export async function cancelOrder(orderId: string) {
   revalidatePath("/dashboard");
 }
 
+// ─────────────────────────── ORDERS LIST PAGE ───────────────────────────
+
+export type OrdersListTab = "current" | "online" | "advance";
+export type OrdersListType = "all" | "DINE_IN" | "DELIVERY" | "TAKEAWAY";
+export type OrdersListSort =
+  | "latest"
+  | "oldest"
+  | "amount_desc"
+  | "amount_asc";
+
+export interface ListOrdersInput {
+  tab?: OrdersListTab;
+  type?: OrdersListType;
+  search?: string;
+  sort?: OrdersListSort;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+}
+
+export async function listOrdersForOrdersPage(input: ListOrdersInput = {}) {
+  const { restaurantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  const tab = input.tab ?? "current";
+  const type = input.type ?? "all";
+  const sort = input.sort ?? "latest";
+  const limit = Math.min(Math.max(input.limit ?? 100, 1), 500);
+
+  const where: import("@prisma/client").Prisma.OrderWhereInput = {
+    restaurantId,
+  };
+
+  // Advance Order tab is reserved for future-dated reservation-driven orders.
+  // For v1 we surface nothing by anchoring to an impossible id.
+  if (tab === "advance") {
+    where.id = "__none__";
+  }
+
+  if (tab === "current") {
+    if (input.dateFrom || input.dateTo) {
+      where.createdAt = {
+        ...(input.dateFrom ? { gte: new Date(input.dateFrom) } : {}),
+        ...(input.dateTo ? { lte: new Date(input.dateTo) } : {}),
+      };
+    } else {
+      // default to last 24 hours of activity
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      where.createdAt = { gte: since };
+    }
+  } else if (tab === "online") {
+    where.type = "ONLINE";
+  }
+
+  if (type !== "all" && tab !== "online") {
+    where.type = type as "DINE_IN" | "DELIVERY" | "TAKEAWAY";
+  }
+
+  if (input.search && input.search.trim().length > 0) {
+    const q = input.search.trim();
+    where.OR = [
+      { orderNumber: { contains: q, mode: "insensitive" } },
+      { customer: { phone: { contains: q } } },
+      { customer: { name: { contains: q, mode: "insensitive" } } },
+      { table: { name: { contains: q, mode: "insensitive" } } },
+    ];
+  }
+
+  const orderBy: import("@prisma/client").Prisma.OrderOrderByWithRelationInput =
+    sort === "oldest"
+      ? { createdAt: "asc" }
+      : sort === "amount_desc"
+        ? { totalAmount: "desc" }
+        : sort === "amount_asc"
+          ? { totalAmount: "asc" }
+          : { createdAt: "desc" };
+
+  const orders = await prisma.order.findMany({
+    where,
+    orderBy,
+    take: limit,
+    include: {
+      table: { select: { name: true } },
+      customer: { select: { name: true, phone: true } },
+      payments: { select: { mode: true, amount: true, status: true } },
+    },
+  });
+
+  return { orders: serialize(orders) };
+}
+
 export async function getActiveOrders() {
   const { restaurantId } = await getTenantScope();
   if (!restaurantId) throw new Error("No restaurant selected");

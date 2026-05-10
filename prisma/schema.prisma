@@ -411,6 +411,7 @@ model Order {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   completedAt DateTime?
+  printedAt   DateTime?
 
   orderItems   OrderItem[]
   kots         KOT[]
