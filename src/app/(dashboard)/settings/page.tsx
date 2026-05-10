@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-const settingsLinks = [
+export const settingsLinks = [
   {
     title: "Restaurant",
     description: "Name, address, GST, FSSAI, logo, and contact details",

@@ -23,6 +23,12 @@ const navItems: NavItem[] = [
     permission: null,
   },
   {
+    title: "Operations",
+    href: "/operations",
+    icon: "apps",
+    permission: null,
+  },
+  {
     title: "POS",
     href: "/pos",
     icon: "point_of_sale",
