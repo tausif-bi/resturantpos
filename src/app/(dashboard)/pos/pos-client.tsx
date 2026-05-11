@@ -618,12 +618,11 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
   const orderTypeLabel =
     orderType === "DINE_IN" ? "Dine In" : orderType === "TAKEAWAY" ? "Pick Up" : "Delivery";
 
-  // Cart panel content — rendered both as the docked column on desktop (≥2xl)
-  // and inside a slide-over Sheet on laptops (<2xl).
-  const cartContent = activeOrder ? (
-    <>
-      {/* Header */}
-      <div className="p-6 border-b border-outline-variant/20">
+  // Cart panel — split into four reusable JSX sections so the docked column
+  // (≥2xl) and Sheet (menuOpen <2xl) can stack them vertically, while the
+  // laptop takeover (<2xl, !menuOpen) lays out items + footer side by side.
+  const cartHeaderEl = activeOrder ? (
+    <div className="p-6 border-b border-outline-variant/20">
         <p className="text-[10px] font-black text-secondary uppercase tracking-[0.2em] mb-1">
           Current Active Order
         </p>
@@ -700,10 +699,11 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
             </select>
           </label>
         </div>
-      </div>
+    </div>
+  ) : null;
 
-      {/* Item Search */}
-      <div className="px-6 pt-4 pb-3 border-b border-outline-variant/20 relative">
+  const cartSearchEl = activeOrder ? (
+    <div className="px-6 pt-4 pb-3 border-b border-outline-variant/20 relative">
         <div className="flex items-center gap-2 bg-surface-container-lowest rounded-xl px-3 py-2 shadow-sm">
           <span className="material-symbols-outlined text-secondary text-lg">search</span>
           <input
@@ -786,11 +786,12 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
             )}
           </div>
         )}
-      </div>
+    </div>
+  ) : null;
 
-      {/* Items */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-3">
-        {activeOrder.orderItems.length === 0 ? (
+  const cartItemsInner = activeOrder ? (
+    <>
+      {activeOrder.orderItems.length === 0 ? (
           <div className="text-center py-8 text-secondary">
             <span className="material-symbols-outlined text-3xl text-stone-300">restaurant_menu</span>
             <p className="text-sm mt-2">No items yet. Search above or open the menu.</p>
@@ -860,11 +861,12 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
               </div>
             </div>
           ))
-        )}
-      </div>
+      )}
+    </>
+  ) : null;
 
-      {/* Billing Footer */}
-      <div className="border-t border-outline-variant/20 p-6 space-y-3">
+  const cartFooterInner = activeOrder ? (
+    <>
         {/* Order-Wise Comments */}
         <div>
           <span className="block text-[10px] font-black text-secondary uppercase tracking-wider mb-1">
@@ -1069,9 +1071,10 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
             onClick={() => toast.info("Integrations coming soon")}
           />
         </div>
-      </div>
     </>
-  ) : (
+  ) : null;
+
+  const emptyCartEl = (
     <div className="flex-1 flex items-center justify-center text-center p-8">
       <div>
         <span className="material-symbols-outlined text-5xl text-stone-300">point_of_sale</span>
@@ -1086,6 +1089,35 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
       </div>
     </div>
   );
+
+  // Stacked layout: header → search → items → footer. Used in the docked
+  // ≥2xl column and the menu-open Sheet slide-over.
+  const cartContent = activeOrder ? (
+    <>
+      {cartHeaderEl}
+      {cartSearchEl}
+      <div className="flex-1 overflow-y-auto p-6 space-y-3">{cartItemsInner}</div>
+      <div className="border-t border-outline-variant/20 p-6 space-y-3">{cartFooterInner}</div>
+    </>
+  ) : (
+    emptyCartEl
+  );
+
+  // Split layout for the laptop takeover (<2xl, !menuOpen): items column on
+  // the left (header + search + scrolling items), bill summary + actions on
+  // the right. Keeps controls in reach and uses horizontal space properly.
+  const cartSplitContent = activeOrder ? (
+    <div className="flex-1 min-h-0 flex min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {cartHeaderEl}
+        {cartSearchEl}
+        <div className="flex-1 overflow-y-auto p-6 space-y-3 min-h-0">{cartItemsInner}</div>
+      </div>
+      <div className="w-[380px] flex-shrink-0 overflow-y-auto border-l border-outline-variant/20 bg-surface-container-low">
+        <div className="p-6 space-y-3">{cartFooterInner}</div>
+      </div>
+    </div>
+  ) : null;
 
   const quickPanel = (
     <QuickSearchPanel
@@ -1135,7 +1167,7 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
               Active Orders ({activeOrdersQueue.length})
             </button>
           </div>
-          <div className="flex-1 min-h-0 overflow-hidden">{cartContent}</div>
+          {cartSplitContent}
         </div>
       )}
 
