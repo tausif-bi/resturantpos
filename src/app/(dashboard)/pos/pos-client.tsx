@@ -14,6 +14,7 @@ import {
   setOrderComplimentary,
   setOrderCustomerPaid,
   markOrderPrinted,
+  moveOrderToTable,
 } from "@/lib/actions/order-actions";
 import { createKOT } from "@/lib/actions/kot-actions";
 import { createPayment } from "@/lib/actions/payment-actions";
@@ -76,6 +77,13 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
   const [lastSyncedOrderId, setLastSyncedOrderId] = useState<string | null>(null);
   const [otherPaymentOpen, setOtherPaymentOpen] = useState(false);
 
+  // Floor-map mini-panel state (Phase 4).
+  const [quickSearch, setQuickSearch] = useState("");
+  const [queueTab, setQueueTab] = useState<"DINE_IN" | "TAKEAWAY" | "DELIVERY" | "KOT">("DINE_IN");
+  const [moveKOTMode, setMoveKOTMode] = useState(false);
+  const [moveSourceOrderId, setMoveSourceOrderId] = useState<string | null>(null);
+  const [activeOrdersSheetOpen, setActiveOrdersSheetOpen] = useState(false);
+
   // Open the laptop cart slide-over only on screens below the 2xl breakpoint;
   // on desktop the docked cart is always visible so this is a no-op.
   function openCartSheetIfLaptop() {
@@ -119,6 +127,88 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
         : ""
     );
   }
+
+  // ── Combined active-order queue feeding the mini-panel + Sheet.
+  const dineInActiveOrders = useMemo(
+    () =>
+      tables
+        .filter((t) => t.orders.length > 0)
+        .map((t) => ({ table: t, order: t.orders[0] })),
+    [tables]
+  );
+  const activeOrdersQueue = useMemo(() => {
+    const q = quickSearch.trim().toLowerCase();
+    let list:
+      | {
+          id: string;
+          orderNumber: string;
+          label: string;
+          subLabel: string;
+          totalAmount: number;
+          tableId: string | null;
+          orderType: "DINE_IN" | "TAKEAWAY" | "DELIVERY";
+          customerPhone?: string;
+        }[];
+    if (queueTab === "KOT") {
+      // Surface only orders that have at least one fired KOT (= a printedAt stamp).
+      const all = [
+        ...dineInActiveOrders.map(({ table, order }) => ({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          label: table.name,
+          subLabel: `${order.orderItems.length} items`,
+          totalAmount: Number(order.totalAmount),
+          tableId: table.id,
+          orderType: "DINE_IN" as const,
+          printedAt: order.printedAt,
+        })),
+        ...nonDineOrders.map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          label: o.customer?.name ?? (o.type === "TAKEAWAY" ? "Pick Up" : "Delivery"),
+          subLabel: `${o.orderItems.length} items`,
+          totalAmount: Number(o.totalAmount),
+          tableId: null,
+          orderType: o.type as "TAKEAWAY" | "DELIVERY",
+          printedAt: o.printedAt,
+          customerPhone: o.customer?.phone,
+        })),
+      ];
+      list = all.filter((o) => o.printedAt != null);
+    } else if (queueTab === "DINE_IN") {
+      list = dineInActiveOrders.map(({ table, order }) => ({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        label: table.name,
+        subLabel: `${order.orderItems.length} items`,
+        totalAmount: Number(order.totalAmount),
+        tableId: table.id,
+        orderType: "DINE_IN" as const,
+      }));
+    } else {
+      list = nonDineOrders
+        .filter((o) => o.type === queueTab)
+        .map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          label: o.customer?.name ?? (o.type === "TAKEAWAY" ? "Pick Up" : "Delivery"),
+          subLabel: o.customer?.phone ? formatPhone(o.customer.phone) : `${o.orderItems.length} items`,
+          totalAmount: Number(o.totalAmount),
+          tableId: null,
+          orderType: o.type as "TAKEAWAY" | "DELIVERY",
+          customerPhone: o.customer?.phone,
+        }));
+    }
+    if (q.length > 0) {
+      list = list.filter(
+        (o) =>
+          o.orderNumber.toLowerCase().includes(q) ||
+          o.label.toLowerCase().includes(q) ||
+          (o.customerPhone ?? "").toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [queueTab, quickSearch, dineInActiveOrders, nonDineOrders]);
 
   const subtotal = Number(activeOrder?.subtotal ?? 0);
   const taxAmount = Number(activeOrder?.taxAmount ?? 0);
@@ -182,6 +272,67 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
         toast.error(error instanceof Error ? error.message : "Failed to seat table");
       }
     });
+  }
+
+  // Pick an order from the mini-panel queue (any type). Routes selection to
+  // the right state slot based on the order's type.
+  function handleSelectFromQueue(entry: { id: string; tableId: string | null; orderType: "DINE_IN" | "TAKEAWAY" | "DELIVERY" }) {
+    if (entry.orderType === "DINE_IN") {
+      if (orderType !== "DINE_IN") setOrderType("DINE_IN");
+      setSelectedTableId(entry.tableId);
+      setSelectedOrderId(null);
+    } else {
+      if (orderType !== entry.orderType) setOrderType(entry.orderType);
+      setSelectedOrderId(entry.id);
+      setSelectedTableId(null);
+    }
+    setActiveOrdersSheetOpen(false);
+    openCartSheetIfLaptop();
+  }
+
+  // Tap-tap handler for Move KOT mode: first click selects the source order,
+  // second click on an empty table moves the source order there.
+  function handleMoveKOTTableClick(
+    table: TableWithOrders,
+    isOccupied: boolean
+  ) {
+    if (moveSourceOrderId == null) {
+      if (!isOccupied) {
+        toast.info("Pick an occupied table to move from");
+        return;
+      }
+      const order = table.orders[0];
+      if (!order) return;
+      setMoveSourceOrderId(order.id);
+      toast.info(`Move from ${table.name} — tap an empty table`);
+      return;
+    }
+    if (isOccupied) {
+      toast.error("Destination must be empty");
+      return;
+    }
+    const sourceId = moveSourceOrderId;
+    setMoveSourceOrderId(null);
+    startTransition(async () => {
+      try {
+        await moveOrderToTable(sourceId, table.id);
+        toast.success(`Moved to ${table.name}`);
+        setMoveKOTMode(false);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to move");
+      }
+    });
+  }
+
+  function toggleMoveKOTMode() {
+    if (moveKOTMode) {
+      setMoveSourceOrderId(null);
+      setMoveKOTMode(false);
+      return;
+    }
+    setMoveKOTMode(true);
+    setMoveSourceOrderId(null);
+    toast.info("Move mode on — pick an occupied table");
   }
 
   function handleStartNonDineOrder() {
@@ -932,31 +1083,58 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
     </div>
   );
 
+  const quickPanel = (
+    <QuickSearchPanel
+      quickSearch={quickSearch}
+      onQuickSearch={setQuickSearch}
+      queueTab={queueTab}
+      onQueueTab={setQueueTab}
+      orders={activeOrdersQueue}
+      activeOrderId={activeOrder?.id ?? null}
+      onSelect={handleSelectFromQueue}
+    />
+  );
+
   return (
     <div className="flex gap-0 -m-8 h-[calc(100vh-4rem)]">
-      {/* LEFT — Floor Map / Order Queue / Menu Selector */}
+      {/* LEFT MINI-PANEL — quick-search + active-order queue (xl+ only) */}
+      <div className="hidden xl:flex w-60 bg-surface-container-low border-r border-outline-variant/30 flex-col">
+        {quickPanel}
+      </div>
+
+      {/* CENTER — Floor Map / Order Queue / Menu Selector */}
       <div className="flex-1 overflow-y-auto p-8">
-        {/* Order Type Radio */}
-        <div className="flex items-center gap-2 bg-surface-container-lowest p-2 rounded-xl shadow-sm mb-6 w-fit">
-          {(["DINE_IN", "TAKEAWAY", "DELIVERY"] as const).map((t) => {
-            const label = t === "DINE_IN" ? "Dine In" : t === "TAKEAWAY" ? "Pick Up" : "Delivery";
-            const icon = t === "DINE_IN" ? "restaurant" : t === "TAKEAWAY" ? "takeout_dining" : "delivery_dining";
-            const active = orderType === t;
-            return (
-              <button
-                key={t}
-                onClick={() => switchOrderType(t)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-                  active
-                    ? "primary-gradient text-white shadow"
-                    : "text-secondary hover:text-on-surface hover:bg-surface-container"
-                }`}
-              >
-                <span className="material-symbols-outlined text-base">{icon}</span>
-                {label}
-              </button>
-            );
-          })}
+        {/* Order Type Radio + laptop Active Orders trigger */}
+        <div className="flex items-center justify-between gap-2 mb-6 flex-wrap">
+          <div className="flex items-center gap-2 bg-surface-container-lowest p-2 rounded-xl shadow-sm w-fit">
+            {(["DINE_IN", "TAKEAWAY", "DELIVERY"] as const).map((t) => {
+              const label = t === "DINE_IN" ? "Dine In" : t === "TAKEAWAY" ? "Pick Up" : "Delivery";
+              const icon = t === "DINE_IN" ? "restaurant" : t === "TAKEAWAY" ? "takeout_dining" : "delivery_dining";
+              const active = orderType === t;
+              return (
+                <button
+                  key={t}
+                  onClick={() => switchOrderType(t)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                    active
+                      ? "primary-gradient text-white shadow"
+                      : "text-secondary hover:text-on-surface hover:bg-surface-container"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-base">{icon}</span>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveOrdersSheetOpen(true)}
+            className="xl:hidden flex items-center gap-1.5 bg-surface-container-lowest border border-outline-variant/30 rounded-lg px-3 py-2 text-xs font-bold text-on-surface shadow-sm hover:border-primary hover:text-primary transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">list_alt</span>
+            Active Orders ({activeOrdersQueue.length})
+          </button>
         </div>
 
         {!menuOpen ? (
@@ -966,6 +1144,10 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
                 tables={tables}
                 selectedTableId={selectedTableId}
                 isPending={isPending}
+                moveKOTMode={moveKOTMode}
+                moveSourceOrderId={moveSourceOrderId}
+                onToggleMoveKOT={toggleMoveKOTMode}
+                onMoveKOTTableClick={handleMoveKOTTableClick}
                 onSelectTable={(id) => {
                   setSelectedTableId(id);
                   openCartSheetIfLaptop();
@@ -1181,6 +1363,29 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
         />
       )}
 
+      {/* Laptop fallback: Active Orders slide-over */}
+      <Sheet open={activeOrdersSheetOpen} onOpenChange={setActiveOrdersSheetOpen}>
+        <SheetContent
+          side="left"
+          className="w-[88vw] sm:!max-w-[320px] !p-0 bg-surface-container-low flex flex-col"
+        >
+          <SheetTitle className="sr-only">Active Orders</SheetTitle>
+          {quickPanel}
+        </SheetContent>
+      </Sheet>
+
+      {/* Online + sync indicator (bottom-left) */}
+      <div className="fixed bottom-4 left-4 z-30 flex items-center gap-2 bg-surface-container-lowest border border-outline-variant/30 rounded-full px-3 py-1.5 shadow-sm">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+        </span>
+        <span className="text-[10px] font-bold text-on-surface uppercase tracking-wider">
+          Online
+        </span>
+        <span className="text-[10px] text-secondary">All orders synced</span>
+      </div>
+
       {/* "Other" payment dialog — pick UPI / Wallet / Split */}
       <Dialog open={otherPaymentOpen} onOpenChange={setOtherPaymentOpen}>
         <DialogContent className="sm:!max-w-sm">
@@ -1217,6 +1422,10 @@ function DineInGrid({
   tables,
   selectedTableId,
   isPending,
+  moveKOTMode,
+  moveSourceOrderId,
+  onToggleMoveKOT,
+  onMoveKOTTableClick,
   onSelectTable,
   onSeat,
   onOpenMenu,
@@ -1224,13 +1433,17 @@ function DineInGrid({
   tables: TableWithOrders[];
   selectedTableId: string | null;
   isPending: boolean;
+  moveKOTMode: boolean;
+  moveSourceOrderId: string | null;
+  onToggleMoveKOT: () => void;
+  onMoveKOTTableClick: (table: TableWithOrders, isOccupied: boolean) => void;
   onSelectTable: (id: string) => void;
   onSeat: (id: string) => void;
   onOpenMenu: (id: string) => void;
 }) {
   return (
     <>
-      <div className="flex items-end justify-between mb-8">
+      <div className="flex flex-wrap items-end justify-between gap-4 mb-4">
         <div>
           <h1 className="font-headline text-3xl font-extrabold text-on-surface tracking-tight">
             Main Dining Hall
@@ -1239,33 +1452,78 @@ function DineInGrid({
             {tables.filter((t) => t.status === "OCCUPIED").length}/{tables.length} Tables Occupied
           </p>
         </div>
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full bg-tertiary shadow-[0_0_8px_rgba(0,94,162,0.4)]" />
-            <span className="text-xs font-bold text-secondary uppercase tracking-wider">Available</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full bg-primary shadow-[0_0_8px_rgba(172,45,0,0.4)]" />
-            <span className="text-xs font-bold text-secondary uppercase tracking-wider">Occupied</span>
-          </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onToggleMoveKOT}
+            className={`flex items-center gap-1.5 px-3 h-9 rounded-lg text-xs font-bold transition-all ${
+              moveKOTMode
+                ? "bg-primary text-on-primary shadow"
+                : "bg-surface-container-lowest border border-outline-variant/30 text-on-surface hover:border-primary hover:text-primary"
+            }`}
+            aria-pressed={moveKOTMode}
+          >
+            <span className="material-symbols-outlined text-base">swap_horiz</span>
+            Move KOT/Items
+          </button>
+          <button
+            type="button"
+            onClick={() => toast.info("Contactless ordering coming soon")}
+            className="flex items-center gap-1.5 px-3 h-9 rounded-lg text-xs font-bold bg-surface-container-lowest border border-outline-variant/30 text-on-surface hover:border-primary hover:text-primary transition-all"
+          >
+            <span className="material-symbols-outlined text-base">qr_code_scanner</span>
+            + Contactless
+          </button>
         </div>
       </div>
+
+      {/* Status legend */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-6 px-1">
+        <LegendDot color="tertiary" label="Blank" />
+        <LegendDot color="primary" label="Running" />
+        <LegendDot color="emerald" label="Printed" />
+        <LegendDot color="amber" label="Paid" />
+        <LegendDot color="violet" label="Running KOT" />
+      </div>
+
+      {moveKOTMode && (
+        <div className="mb-4 px-4 py-2.5 bg-primary/10 border border-primary/30 rounded-lg flex items-center gap-2 text-xs font-semibold text-on-surface">
+          <span className="material-symbols-outlined text-base text-primary">info</span>
+          {moveSourceOrderId
+            ? "Pick an empty table to move the order to."
+            : "Pick an occupied table to move from."}
+        </div>
+      )}
 
       <div className="grid grid-cols-4 gap-6">
         {tables.map((table) => {
           const order = table.orders[0];
           const isOccupied = table.status === "OCCUPIED" && order;
           const isSelected = table.id === selectedTableId;
+          const isMoveSource = order && order.id === moveSourceOrderId;
+          const isPrinted = order?.printedAt != null;
+          const isKOTHere = order?.orderItems?.some((i) => !!i.kotId);
+          const tint = !isOccupied
+            ? "border-tertiary"
+            : isPrinted && isKOTHere
+              ? "border-violet-500"
+              : isPrinted
+                ? "border-emerald-500"
+                : "border-primary";
 
           return (
             <div
               key={table.id}
               onClick={() => {
+                if (moveKOTMode) {
+                  onMoveKOTTableClick(table, Boolean(isOccupied));
+                  return;
+                }
                 if (isOccupied) onSelectTable(table.id);
               }}
-              className={`bg-surface-container-lowest p-6 rounded-xl shadow-sm border-l-4 hover:shadow-md transition-all cursor-pointer ${
-                isOccupied ? "border-primary" : "border-tertiary"
-              } ${isSelected ? "ring-2 ring-primary/30" : ""}`}
+              className={`bg-surface-container-lowest p-6 rounded-xl shadow-sm border-l-4 hover:shadow-md transition-all cursor-pointer ${tint} ${
+                isSelected ? "ring-2 ring-primary/30" : ""
+              } ${isMoveSource ? "ring-2 ring-amber-400" : ""}`}
             >
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-headline text-2xl font-extrabold text-on-surface">{table.name}</h3>
@@ -1428,6 +1686,151 @@ function NonDineQueue({
           })}
         </div>
       )}
+    </>
+  );
+}
+
+function LegendDot({
+  color,
+  label,
+}: {
+  color: "tertiary" | "primary" | "emerald" | "amber" | "violet";
+  label: string;
+}) {
+  const bg = {
+    tertiary: "bg-tertiary",
+    primary: "bg-primary",
+    emerald: "bg-emerald-500",
+    amber: "bg-amber-400",
+    violet: "bg-violet-500",
+  }[color];
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`h-2.5 w-2.5 rounded-full ${bg}`} />
+      <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+type QueueEntry = {
+  id: string;
+  orderNumber: string;
+  label: string;
+  subLabel: string;
+  totalAmount: number;
+  tableId: string | null;
+  orderType: "DINE_IN" | "TAKEAWAY" | "DELIVERY";
+  customerPhone?: string;
+};
+
+function QuickSearchPanel({
+  quickSearch,
+  onQuickSearch,
+  queueTab,
+  onQueueTab,
+  orders,
+  activeOrderId,
+  onSelect,
+}: {
+  quickSearch: string;
+  onQuickSearch: (v: string) => void;
+  queueTab: "DINE_IN" | "TAKEAWAY" | "DELIVERY" | "KOT";
+  onQueueTab: (v: "DINE_IN" | "TAKEAWAY" | "DELIVERY" | "KOT") => void;
+  orders: QueueEntry[];
+  activeOrderId: string | null;
+  onSelect: (entry: QueueEntry) => void;
+}) {
+  return (
+    <>
+      <div className="p-4 border-b border-outline-variant/20">
+        <p className="text-[10px] font-black text-secondary uppercase tracking-[0.2em] mb-2">
+          Quick Search
+        </p>
+        <div className="flex items-center gap-2 bg-surface-container-lowest rounded-lg px-2.5 py-1.5">
+          <span className="material-symbols-outlined text-secondary text-base">search</span>
+          <input
+            value={quickSearch}
+            onChange={(e) => onQuickSearch(e.target.value)}
+            placeholder="Table / Bill / Phone"
+            className="flex-1 bg-transparent text-xs outline-none placeholder:text-stone-400 min-w-0"
+            autoComplete="off"
+          />
+          {quickSearch && (
+            <button
+              type="button"
+              onClick={() => onQuickSearch("")}
+              className="text-secondary hover:text-on-surface shrink-0"
+              aria-label="Clear search"
+            >
+              <span className="material-symbols-outlined text-sm">close</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="px-2 pt-2 grid grid-cols-4 gap-1 border-b border-outline-variant/20 pb-2">
+        {(
+          [
+            { key: "DINE_IN", label: "Dine In", icon: "restaurant" },
+            { key: "TAKEAWAY", label: "Pick Up", icon: "takeout_dining" },
+            { key: "DELIVERY", label: "Delivery", icon: "delivery_dining" },
+            { key: "KOT", label: "KOT", icon: "soup_kitchen" },
+          ] as const
+        ).map((t) => {
+          const active = queueTab === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => onQueueTab(t.key)}
+              className={`flex flex-col items-center gap-0.5 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                active
+                  ? "bg-primary text-on-primary shadow"
+                  : "text-secondary hover:text-on-surface hover:bg-surface-container"
+              }`}
+              aria-pressed={active}
+            >
+              <span className="material-symbols-outlined text-base">{t.icon}</span>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+        {orders.length === 0 ? (
+          <p className="text-center text-[11px] text-secondary italic py-6">
+            No active orders
+          </p>
+        ) : (
+          orders.map((o) => {
+            const selected = o.id === activeOrderId;
+            return (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => onSelect(o)}
+                className={`w-full text-left rounded-lg border p-2.5 transition-all ${
+                  selected
+                    ? "border-primary bg-primary/5 shadow-sm"
+                    : "border-outline-variant/30 bg-surface-container-lowest hover:border-primary/40"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-extrabold text-on-surface truncate">{o.label}</span>
+                  <span className="text-[10px] font-black text-on-surface shrink-0">
+                    {formatCurrency(o.totalAmount)}
+                  </span>
+                </div>
+                <p className="text-[10px] font-mono text-secondary truncate">{o.orderNumber}</p>
+                <p className="text-[10px] text-secondary truncate">{o.subLabel}</p>
+              </button>
+            );
+          })
+        )}
+      </div>
     </>
   );
 }

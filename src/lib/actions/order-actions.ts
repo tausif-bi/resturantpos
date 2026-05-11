@@ -300,6 +300,52 @@ export async function markOrderPrinted(orderId: string) {
   revalidatePath("/orders");
 }
 
+// Move an open order from one dine-in table to another. Used by the
+// "Move KOT/Items" mode on the floor map. Frees the source table and
+// occupies the destination atomically.
+export async function moveOrderToTable(orderId: string, newTableId: string) {
+  const { restaurantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  await prisma.$transaction(async (tx) => {
+    const order = await tx.order.findFirst({
+      where: { id: orderId, restaurantId },
+      select: { id: true, tableId: true, status: true },
+    });
+    if (!order) throw new Error("Order not found");
+    if (order.tableId === newTableId) return;
+    if (["COMPLETED", "CANCELLED"].includes(order.status)) {
+      throw new Error("Cannot move a closed order");
+    }
+
+    const dest = await tx.table.findFirst({
+      where: { id: newTableId, restaurantId },
+      select: { id: true, status: true },
+    });
+    if (!dest) throw new Error("Destination table not found");
+    if (dest.status === "OCCUPIED") {
+      throw new Error("Destination table is already occupied");
+    }
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: { tableId: newTableId },
+    });
+    if (order.tableId) {
+      await tx.table.update({
+        where: { id: order.tableId },
+        data: { status: "AVAILABLE" },
+      });
+    }
+    await tx.table.update({
+      where: { id: newTableId },
+      data: { status: "OCCUPIED" },
+    });
+  });
+
+  revalidatePath("/pos");
+}
+
 // Returns active waiters and managers for the Assign-to dropdown.
 export async function getAssignableStaff() {
   const { restaurantId, tenantId } = await getTenantScope();
