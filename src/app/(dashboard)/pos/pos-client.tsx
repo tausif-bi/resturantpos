@@ -108,6 +108,10 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
   const activeOrder =
     orderType === "DINE_IN" ? (selectedTable?.orders[0] ?? null) : nonDineActiveOrder;
   const orderId = activeOrder?.id;
+  // Below 2xl: when an order is selected and the menu picker is closed, the
+  // cart takes over the main area (floor map + quick-search panel hide so the
+  // cart can use the full width to the right of the global sidebar).
+  const cartTakeoverActive = Boolean(activeOrder) && !menuOpen;
 
   // Reset draft fields whenever the active order changes (React 19 pattern:
   // adjust state during render, guarded by a "previous id" check to avoid a loop).
@@ -1097,13 +1101,51 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
 
   return (
     <div className="flex gap-0 -m-8 h-[calc(100vh-4rem)]">
-      {/* LEFT MINI-PANEL — quick-search + active-order queue (xl+ only) */}
-      <div className="hidden xl:flex w-60 bg-surface-container-low border-r border-outline-variant/30 flex-col">
+      {/* LEFT MINI-PANEL — quick-search + active-order queue (xl+ only).
+          When the cart takeover is active below 2xl, this hides so the cart
+          can use the full width. */}
+      <div
+        className={`${
+          cartTakeoverActive ? "hidden 2xl:flex" : "hidden xl:flex"
+        } w-60 bg-surface-container-low border-r border-outline-variant/30 flex-col`}
+      >
         {quickPanel}
       </div>
 
-      {/* CENTER — Floor Map / Order Queue / Menu Selector */}
-      <div className="flex-1 overflow-y-auto p-8">
+      {/* CART TAKEOVER (below 2xl, only when an order is selected and the
+          menu picker is closed). At 2xl+ the docked cart on the right handles
+          this — takeover stays hidden. */}
+      {cartTakeoverActive && (
+        <div className="flex-1 2xl:hidden flex flex-col bg-surface-container min-w-0">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-outline-variant/30 bg-surface-container-lowest shadow-sm">
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="flex items-center gap-1.5 px-3 h-9 rounded-lg text-xs font-bold bg-surface-container-high text-on-surface hover:bg-surface-dim transition-colors"
+            >
+              <span className="material-symbols-outlined text-base">arrow_back</span>
+              Back to floor
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveOrdersSheetOpen(true)}
+              className="ml-auto flex items-center gap-1.5 px-3 h-9 rounded-lg text-xs font-bold border border-outline-variant/30 bg-surface-container-lowest text-on-surface hover:border-primary hover:text-primary transition-colors"
+            >
+              <span className="material-symbols-outlined text-base">list_alt</span>
+              Active Orders ({activeOrdersQueue.length})
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-hidden">{cartContent}</div>
+        </div>
+      )}
+
+      {/* CENTER — Floor Map / Order Queue / Menu Selector.
+          Hidden below 2xl while the cart takeover is active. */}
+      <div
+        className={`${
+          cartTakeoverActive ? "hidden 2xl:block" : "block"
+        } flex-1 overflow-y-auto p-8 min-w-0`}
+      >
         {/* Order Type Radio + laptop Active Orders trigger */}
         <div className="flex items-center justify-between gap-2 mb-6 flex-wrap">
           <div className="flex items-center gap-2 bg-surface-container-lowest p-2 rounded-xl shadow-sm w-fit">
@@ -1322,9 +1364,11 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
         {cartContent}
       </div>
 
-      {/* Floating cart button + slide-over (laptop / smaller screens, <1536px) */}
+      {/* Floating cart button + slide-over — only when the menu picker is open
+          below 2xl. When !menuOpen the cart takeover already fills the main
+          area, so the floating button would be redundant. */}
       <div className="2xl:hidden">
-        {activeOrder && (
+        {activeOrder && menuOpen && (
           <button
             type="button"
             onClick={() => setCartSheetOpen(true)}
@@ -1338,7 +1382,7 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
           </button>
         )}
         <Sheet
-          open={cartSheetOpen && Boolean(activeOrder)}
+          open={cartSheetOpen && Boolean(activeOrder) && menuOpen}
           onOpenChange={setCartSheetOpen}
         >
           <SheetContent
@@ -1495,7 +1539,7 @@ function DineInGrid({
         </div>
       )}
 
-      <div className="grid grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 2xl:grid-cols-4 gap-3 sm:gap-4">
         {tables.map((table) => {
           const order = table.orders[0];
           const isOccupied = table.status === "OCCUPIED" && order;
@@ -1521,14 +1565,14 @@ function DineInGrid({
                 }
                 if (isOccupied) onSelectTable(table.id);
               }}
-              className={`bg-surface-container-lowest p-6 rounded-xl shadow-sm border-l-4 hover:shadow-md transition-all cursor-pointer ${tint} ${
+              className={`bg-surface-container-lowest p-4 rounded-xl shadow-sm border-l-4 hover:shadow-md transition-all cursor-pointer ${tint} ${
                 isSelected ? "ring-2 ring-primary/30" : ""
               } ${isMoveSource ? "ring-2 ring-amber-400" : ""}`}
             >
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-headline text-2xl font-extrabold text-on-surface">{table.name}</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-headline text-xl font-extrabold text-on-surface">{table.name}</h3>
                 <span
-                  className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full ${
+                  className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
                     isOccupied ? "bg-primary/10 text-primary" : "bg-tertiary/10 text-tertiary"
                   }`}
                 >
@@ -1538,33 +1582,33 @@ function DineInGrid({
 
               {isOccupied ? (
                 <>
-                  <p className="text-xs text-secondary mb-1">Server: {order.createdBy.name}</p>
-                  <p className="text-xs text-secondary mb-4">
+                  <p className="text-[11px] text-secondary truncate">Server: {order.createdBy.name}</p>
+                  <p className="text-[11px] text-secondary mb-2 truncate">
                     {order.orderNumber} · {order.orderItems.length} items
                   </p>
-                  <p className="text-xl font-black font-headline text-on-surface mb-4">
+                  <p className="text-lg font-black font-headline text-on-surface mb-3">
                     {formatCurrency(order.totalAmount.toString())}
                   </p>
-                  <div className="flex gap-2">
+                  <div className="flex gap-1.5">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         onOpenMenu(table.id);
                       }}
-                      className="flex-1 flex items-center justify-center gap-1.5 bg-surface-container-highest text-on-surface text-xs font-bold py-2 rounded-lg hover:bg-surface-dim transition-colors"
+                      className="flex-1 flex items-center justify-center gap-1 bg-surface-container-highest text-on-surface text-[11px] font-bold py-1.5 rounded-lg hover:bg-surface-dim transition-colors"
                     >
                       <span className="material-symbols-outlined text-sm">add_circle</span>
-                      Add Item
+                      Add
                     </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         onSelectTable(table.id);
                       }}
-                      className="flex-1 flex items-center justify-center gap-1.5 bg-primary text-on-primary text-xs font-bold py-2 rounded-lg"
+                      className="flex-1 flex items-center justify-center gap-1 bg-primary text-on-primary text-[11px] font-bold py-1.5 rounded-lg"
                     >
                       <span className="material-symbols-outlined text-sm">receipt_long</span>
-                      Bill Now
+                      Bill
                     </button>
                   </div>
                 </>
@@ -1574,13 +1618,13 @@ function DineInGrid({
                     e.stopPropagation();
                     onSeat(table.id);
                   }}
-                  className="flex-1 flex items-center justify-center border-2 border-dashed border-outline-variant/40 rounded-lg py-8 mt-2 hover:border-tertiary/60 hover:bg-tertiary/5 transition-all group"
+                  className="flex-1 flex items-center justify-center border-2 border-dashed border-outline-variant/40 rounded-lg py-5 mt-1 hover:border-tertiary/60 hover:bg-tertiary/5 transition-all group"
                 >
                   <div className="text-center">
-                    <span className="material-symbols-outlined text-3xl text-outline-variant group-hover:text-tertiary transition-colors">
+                    <span className="material-symbols-outlined text-2xl text-outline-variant group-hover:text-tertiary transition-colors">
                       touch_app
                     </span>
-                    <p className="text-xs font-bold text-secondary mt-1 group-hover:text-tertiary transition-colors">
+                    <p className="text-[11px] font-bold text-secondary mt-0.5 group-hover:text-tertiary transition-colors">
                       {isPending ? "Seating..." : "Tap to Seat"}
                     </p>
                   </div>
