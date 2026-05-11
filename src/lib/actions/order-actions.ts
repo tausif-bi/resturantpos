@@ -10,9 +10,17 @@ import {
   createOrderSchema,
   addItemSchema,
   discountSchema,
+  orderMetaSchema,
+  orderRoundOffSchema,
+  orderComplimentarySchema,
+  orderCustomerPaidSchema,
   type CreateOrderFormData,
   type AddItemFormData,
   type DiscountFormData,
+  type OrderMetaFormData,
+  type OrderRoundOffFormData,
+  type OrderComplimentaryFormData,
+  type OrderCustomerPaidFormData,
 } from "@/lib/validators/order";
 
 export async function createOrder(data: CreateOrderFormData) {
@@ -78,6 +86,7 @@ export async function getActiveNonDineOrders() {
         },
       },
       createdBy: { select: { name: true } },
+      assignedTo: { select: { id: true, name: true } },
       customer: { select: { name: true, phone: true, address: true, locality: true } },
       payments: true,
     },
@@ -217,6 +226,97 @@ export async function applyDiscount(data: DiscountFormData) {
 
   await recalculateOrderTotals(validated.orderId);
   revalidatePath("/pos");
+}
+
+export async function updateOrderMeta(data: OrderMetaFormData) {
+  const validated = orderMetaSchema.parse(data);
+  const { restaurantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  await prisma.order.update({
+    where: { id: validated.orderId, restaurantId },
+    data: {
+      persons: validated.persons ?? null,
+      assignedToId: validated.assignedToId ?? null,
+      notes: validated.notes ?? null,
+    },
+  });
+
+  revalidatePath("/pos");
+}
+
+export async function setOrderRoundOff(data: OrderRoundOffFormData) {
+  const validated = orderRoundOffSchema.parse(data);
+  const { restaurantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  await prisma.order.update({
+    where: { id: validated.orderId, restaurantId },
+    data: { roundOff: validated.roundOff },
+  });
+
+  await recalculateOrderTotals(validated.orderId);
+  revalidatePath("/pos");
+}
+
+export async function setOrderComplimentary(data: OrderComplimentaryFormData) {
+  const validated = orderComplimentarySchema.parse(data);
+  const { restaurantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  await prisma.order.update({
+    where: { id: validated.orderId, restaurantId },
+    data: { complimentary: validated.complimentary },
+  });
+
+  await recalculateOrderTotals(validated.orderId);
+  revalidatePath("/pos");
+}
+
+export async function setOrderCustomerPaid(data: OrderCustomerPaidFormData) {
+  const validated = orderCustomerPaidSchema.parse(data);
+  const { restaurantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  await prisma.order.update({
+    where: { id: validated.orderId, restaurantId },
+    data: { customerPaid: validated.customerPaid },
+  });
+
+  revalidatePath("/pos");
+}
+
+// Stamps printedAt without sending a KOT. Used by Save & Print.
+export async function markOrderPrinted(orderId: string) {
+  const { restaurantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  await prisma.order.update({
+    where: { id: orderId, restaurantId },
+    data: { printedAt: new Date() },
+  });
+
+  revalidatePath("/pos");
+  revalidatePath("/orders");
+}
+
+// Returns active waiters and managers for the Assign-to dropdown.
+export async function getAssignableStaff() {
+  const { restaurantId, tenantId } = await getTenantScope();
+  if (!restaurantId) throw new Error("No restaurant selected");
+
+  const users = await prisma.user.findMany({
+    where: {
+      tenantId,
+      isActive: true,
+      role: { in: ["WAITER", "MANAGER", "CASHIER", "OWNER"] },
+      staffAssignments: { some: { restaurantId } },
+    },
+    select: { id: true, name: true, role: true },
+    orderBy: [{ role: "asc" }, { name: "asc" }],
+  });
+
+  return users;
 }
 
 export async function completeOrder(orderId: string) {
@@ -435,16 +535,19 @@ async function recalculateOrderTotals(orderId: string) {
   const taxBreakdown = Array.from(taxMap.values());
   const taxAmount = taxBreakdown.reduce((sum, t) => sum + t.taxAmount, 0);
 
-  // Get current discount
+  // Get current discount + complimentary flag
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { discountAmount: true, roundOff: true },
+    select: { discountAmount: true, roundOff: true, complimentary: true },
   });
 
-  const discount = Number(order?.discountAmount ?? 0);
+  // Complimentary orders zero out subtotal + tax via a 100% discount.
+  const effectiveDiscount = order?.complimentary
+    ? subtotal + taxAmount
+    : Number(order?.discountAmount ?? 0);
   const roundOff = Number(order?.roundOff ?? 0);
   const totalAmount =
-    Math.round((subtotal + taxAmount - discount + roundOff) * 100) / 100;
+    Math.round((subtotal + taxAmount - effectiveDiscount + roundOff) * 100) / 100;
 
   // Delete old tax records and create new ones
   await prisma.orderTax.deleteMany({ where: { orderId } });

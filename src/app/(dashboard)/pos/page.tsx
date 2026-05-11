@@ -1,14 +1,18 @@
 import { getTablesWithActiveOrders } from "@/lib/actions/table-actions";
 import { getCategories, getMenuItems } from "@/lib/actions/menu-actions";
-import { getActiveNonDineOrders } from "@/lib/actions/order-actions";
+import {
+  getActiveNonDineOrders,
+  getAssignableStaff,
+} from "@/lib/actions/order-actions";
 import { POSClient } from "./pos-client";
 
 export default async function POSPage() {
-  const [tables, nonDineOrders, categories, menuItems] = await Promise.all([
+  const [tables, nonDineOrders, categories, menuItems, staff] = await Promise.all([
     getTablesWithActiveOrders(),
     getActiveNonDineOrders(),
     getCategories(),
     getMenuItems(),
+    getAssignableStaff(),
   ]);
 
   return (
@@ -17,6 +21,7 @@ export default async function POSPage() {
       nonDineOrders={nonDineOrders}
       categories={categories}
       menuItems={menuItems}
+      staff={staff}
     />
   );
 }

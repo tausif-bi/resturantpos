@@ -38,8 +38,34 @@ export const createPaymentSchema = z.object({
   reference: z.string().max(200).optional(),
 });
 
+export const orderMetaSchema = z.object({
+  orderId: z.string().min(1),
+  persons: z.number().int().min(0).max(99).nullable().optional(),
+  assignedToId: z.string().nullable().optional(),
+  notes: z.string().max(1000).nullable().optional(),
+});
+
+export const orderRoundOffSchema = z.object({
+  orderId: z.string().min(1),
+  roundOff: z.number().min(-99).max(99),
+});
+
+export const orderComplimentarySchema = z.object({
+  orderId: z.string().min(1),
+  complimentary: z.boolean(),
+});
+
+export const orderCustomerPaidSchema = z.object({
+  orderId: z.string().min(1),
+  customerPaid: z.number().min(0).nullable(),
+});
+
 export type CreateOrderFormData = z.infer<typeof createOrderSchema>;
 export type AddItemFormData = z.infer<typeof addItemSchema>;
 export type UpdateItemQtyFormData = z.infer<typeof updateItemQtySchema>;
 export type DiscountFormData = z.infer<typeof discountSchema>;
 export type CreatePaymentFormData = z.infer<typeof createPaymentSchema>;
+export type OrderMetaFormData = z.infer<typeof orderMetaSchema>;
+export type OrderRoundOffFormData = z.infer<typeof orderRoundOffSchema>;
+export type OrderComplimentaryFormData = z.infer<typeof orderComplimentarySchema>;
+export type OrderCustomerPaidFormData = z.infer<typeof orderCustomerPaidSchema>;

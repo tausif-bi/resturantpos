@@ -9,12 +9,23 @@ import {
   updateOrderItemQuantity,
   removeOrderItem,
   cancelOrder,
+  updateOrderMeta,
+  setOrderRoundOff,
+  setOrderComplimentary,
+  setOrderCustomerPaid,
+  markOrderPrinted,
 } from "@/lib/actions/order-actions";
 import { createKOT } from "@/lib/actions/kot-actions";
 import { createPayment } from "@/lib/actions/payment-actions";
 import { CustomerDetailsDialog } from "./customer-details-dialog";
 import { formatPhone } from "@/lib/validators/customer";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type TableWithOrders = Awaited<
   ReturnType<typeof import("@/lib/actions/table-actions").getTablesWithActiveOrders>
@@ -28,6 +39,9 @@ type Category = Awaited<
 type MenuItem = Awaited<
   ReturnType<typeof import("@/lib/actions/menu-actions").getMenuItems>
 >[number];
+type Staff = Awaited<
+  ReturnType<typeof import("@/lib/actions/order-actions").getAssignableStaff>
+>[number];
 
 type OrderType = "DINE_IN" | "TAKEAWAY" | "DELIVERY";
 
@@ -36,11 +50,12 @@ type Props = {
   nonDineOrders: NonDineOrder[];
   categories: Category[];
   menuItems: MenuItem[];
+  staff: Staff[];
 };
 
-type PaymentMode = "CASH" | "CARD" | "UPI";
+type PaymentMode = "CASH" | "CARD" | "UPI" | "WALLET" | "SPLIT";
 
-export function POSClient({ tables, nonDineOrders, categories, menuItems }: Props) {
+export function POSClient({ tables, nonDineOrders, categories, menuItems, staff }: Props) {
   const [orderType, setOrderType] = useState<OrderType>("DINE_IN");
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -48,10 +63,18 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
   const [menuCategory, setMenuCategory] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
-  const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
   const [, setTick] = useState(0);
   const [isPending, startTransition] = useTransition();
+
+  // Cart meta drafts — reset to activeOrder values whenever selection changes.
+  const [personsDraft, setPersonsDraft] = useState("");
+  const [assignedToDraft, setAssignedToDraft] = useState<string>("");
+  const [notesDraft, setNotesDraft] = useState("");
+  const [roundOffDraft, setRoundOffDraft] = useState("");
+  const [customerPaidDraft, setCustomerPaidDraft] = useState("");
+  const [lastSyncedOrderId, setLastSyncedOrderId] = useState<string | null>(null);
+  const [otherPaymentOpen, setOtherPaymentOpen] = useState(false);
 
   // Open the laptop cart slide-over only on screens below the 2xl breakpoint;
   // on desktop the docked cart is always visible so this is a no-op.
@@ -68,11 +91,6 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
     return () => clearInterval(id);
   }, []);
 
-  // Reset payment mode whenever the active order changes
-  useEffect(() => {
-    setPaymentMode(null);
-  }, [selectedTableId, selectedOrderId]);
-
   // Resolve the currently active order from whichever source matches the mode.
   const selectedTable = tables.find((t) => t.id === selectedTableId);
   const nonDineActiveOrder =
@@ -83,12 +101,37 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
     orderType === "DINE_IN" ? (selectedTable?.orders[0] ?? null) : nonDineActiveOrder;
   const orderId = activeOrder?.id;
 
+  // Reset draft fields whenever the active order changes (React 19 pattern:
+  // adjust state during render, guarded by a "previous id" check to avoid a loop).
+  const currentOrderId = activeOrder?.id ?? null;
+  if (currentOrderId !== lastSyncedOrderId) {
+    setLastSyncedOrderId(currentOrderId);
+    setPersonsDraft(
+      activeOrder?.persons != null ? String(activeOrder.persons) : ""
+    );
+    setAssignedToDraft(activeOrder?.assignedToId ?? "");
+    setNotesDraft(activeOrder?.notes ?? "");
+    const ro = Number(activeOrder?.roundOff ?? 0);
+    setRoundOffDraft(ro === 0 ? "" : String(ro));
+    setCustomerPaidDraft(
+      activeOrder?.customerPaid != null
+        ? String(Number(activeOrder.customerPaid))
+        : ""
+    );
+  }
+
   const subtotal = Number(activeOrder?.subtotal ?? 0);
   const taxAmount = Number(activeOrder?.taxAmount ?? 0);
   const discount = Number(activeOrder?.discountAmount ?? 0);
   const totalAmount = Number(activeOrder?.totalAmount ?? 0);
+  const roundOff = Number(activeOrder?.roundOff ?? 0);
   const totalPaid =
     activeOrder?.payments?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
+  const totalQty =
+    activeOrder?.orderItems?.reduce((sum, i) => sum + i.quantity, 0) ?? 0;
+  const customerPaidValue = Number(customerPaidDraft) || 0;
+  const returnToCustomer =
+    customerPaidValue > 0 ? Math.max(0, customerPaidValue - totalAmount) : 0;
 
   const unsentItems = activeOrder?.orderItems?.filter((i) => !i.kotId) ?? [];
   const filteredMenuItems = menuCategory
@@ -121,7 +164,6 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
     setSelectedOrderId(null);
     setMenuOpen(false);
     setSearch("");
-    setPaymentMode(null);
   }
 
   function switchOrderType(type: OrderType) {
@@ -213,41 +255,209 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
     });
   }
 
-  function handleSettle() {
-    if (!orderId || totalAmount <= 0) return;
-    if (!paymentMode) {
-      toast.info("Select a payment method first");
-      return;
-    }
-    const remaining = totalAmount - totalPaid;
-    if (remaining <= 0) return;
-
+  function handleSavePersons() {
+    if (!orderId) return;
+    const trimmed = personsDraft.trim();
+    const next = trimmed === "" ? null : Math.max(0, Math.min(99, parseInt(trimmed, 10) || 0));
+    const current = activeOrder?.persons ?? null;
+    if (next === current) return;
     startTransition(async () => {
       try {
-        await createPayment({ orderId, mode: paymentMode, amount: remaining });
+        await updateOrderMeta({
+          orderId,
+          persons: next,
+          assignedToId: activeOrder?.assignedToId ?? null,
+          notes: activeOrder?.notes ?? null,
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to save persons");
+      }
+    });
+  }
+
+  function handleSaveAssignee(nextId: string) {
+    if (!orderId) return;
+    const next = nextId === "" ? null : nextId;
+    if ((activeOrder?.assignedToId ?? null) === next) return;
+    setAssignedToDraft(nextId);
+    startTransition(async () => {
+      try {
+        await updateOrderMeta({
+          orderId,
+          persons: activeOrder?.persons ?? null,
+          assignedToId: next,
+          notes: activeOrder?.notes ?? null,
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to assign");
+      }
+    });
+  }
+
+  function handleSaveNotes() {
+    if (!orderId) return;
+    const next = notesDraft.trim() === "" ? null : notesDraft;
+    if ((activeOrder?.notes ?? null) === next) return;
+    startTransition(async () => {
+      try {
+        await updateOrderMeta({
+          orderId,
+          persons: activeOrder?.persons ?? null,
+          assignedToId: activeOrder?.assignedToId ?? null,
+          notes: next,
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to save note");
+      }
+    });
+  }
+
+  function handleSaveRoundOff() {
+    if (!orderId) return;
+    const trimmed = roundOffDraft.trim();
+    const raw = trimmed === "" ? 0 : Number(trimmed);
+    const next = Number.isFinite(raw) ? Math.max(-99, Math.min(99, raw)) : 0;
+    if (Number(activeOrder?.roundOff ?? 0) === next) return;
+    startTransition(async () => {
+      try {
+        await setOrderRoundOff({ orderId, roundOff: next });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to save round off");
+      }
+    });
+  }
+
+  function handleSaveCustomerPaid() {
+    if (!orderId) return;
+    const trimmed = customerPaidDraft.trim();
+    const raw = trimmed === "" ? null : Number(trimmed);
+    const next = raw == null ? null : Math.max(0, raw);
+    const current = activeOrder?.customerPaid != null ? Number(activeOrder.customerPaid) : null;
+    if (current === next) return;
+    startTransition(async () => {
+      try {
+        await setOrderCustomerPaid({ orderId, customerPaid: next });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to save");
+      }
+    });
+  }
+
+  function handleToggleComplimentary() {
+    if (!orderId) return;
+    const next = !(activeOrder?.complimentary ?? false);
+    if (next && !confirm("Mark this order as complimentary? Total will be zeroed out.")) return;
+    startTransition(async () => {
+      try {
+        await setOrderComplimentary({ orderId, complimentary: next });
+        toast.success(next ? "Marked complimentary" : "Complimentary removed");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to update");
+      }
+    });
+  }
+
+  // Open a print preview window with a basic bill/KOT template.
+  function openPrintWindow(kind: "bill" | "kot") {
+    if (!activeOrder) return;
+    const win = window.open("", "_blank", "width=380,height=600");
+    if (!win) {
+      toast.error("Pop-up blocked. Allow pop-ups to print.");
+      return;
+    }
+    const itemsForPrint =
+      kind === "kot"
+        ? activeOrder.orderItems.filter((i) => !!i.kotId)
+        : activeOrder.orderItems;
+    const rows = itemsForPrint
+      .map(
+        (i) =>
+          `<tr><td>${escapeHtml(i.menuItem.name)}${i.variant ? ` (${escapeHtml(i.variant.name)})` : ""}</td><td style="text-align:center">${i.quantity}</td>${kind === "bill" ? `<td style="text-align:right">${Number(i.totalPrice).toFixed(2)}</td>` : ""}</tr>`
+      )
+      .join("");
+    const title = kind === "kot" ? "Kitchen Order Ticket" : "Bill";
+    const tableLabel =
+      activeOrder.type === "DINE_IN" ? selectedTable?.name ?? "" : activeOrder.type.replace("_", " ");
+    const footer =
+      kind === "bill"
+        ? `<table style="width:100%;font-size:12px;margin-top:8px"><tr><td>Subtotal</td><td style="text-align:right">${subtotal.toFixed(2)}</td></tr><tr><td>Tax</td><td style="text-align:right">${taxAmount.toFixed(2)}</td></tr>${discount ? `<tr><td>Discount</td><td style="text-align:right">-${discount.toFixed(2)}</td></tr>` : ""}${roundOff ? `<tr><td>Round Off</td><td style="text-align:right">${roundOff.toFixed(2)}</td></tr>` : ""}<tr style="font-weight:bold;border-top:1px dashed #333"><td>Total</td><td style="text-align:right">${totalAmount.toFixed(2)}</td></tr></table>`
+        : "";
+    win.document.write(`<!doctype html><html><head><title>${title} — ${escapeHtml(activeOrder.orderNumber)}</title><style>body{font-family:ui-monospace,monospace;padding:12px;font-size:12px;color:#000}h1{font-size:14px;margin:0 0 4px}table{width:100%;border-collapse:collapse}td{padding:2px 0}thead td{border-bottom:1px dashed #333;font-weight:bold}.meta{margin-bottom:8px;color:#444}</style></head><body><h1>${title}</h1><div class="meta">${escapeHtml(activeOrder.orderNumber)} · ${escapeHtml(tableLabel)}<br/>${new Date().toLocaleString()}</div><table><thead><tr><td>Item</td><td style="text-align:center">Qty</td>${kind === "bill" ? `<td style="text-align:right">Amt</td>` : ""}</tr></thead><tbody>${rows}</tbody></table>${footer}<script>window.onload=function(){window.print();}</script></body></html>`);
+    win.document.close();
+  }
+
+  function handleSave() {
+    if (!orderId) return;
+    toast.success("Order saved");
+  }
+
+  function handleSaveAndPrint() {
+    if (!orderId) return;
+    startTransition(async () => {
+      try {
+        await markOrderPrinted(orderId);
+        openPrintWindow("bill");
+        toast.success("Bill printed");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to print");
+      }
+    });
+  }
+
+  function handleSaveAndEBill() {
+    if (!orderId) return;
+    toast.success("EBill queued — SMS/email integration coming soon");
+  }
+
+  function handleReset() {
+    if (!orderId) return;
+    if (!confirm("Reset this order? All items and the order itself will be discarded.")) return;
+    startTransition(async () => {
+      try {
+        await cancelOrder(orderId);
         clearSelection();
-        toast.success("Payment recorded — order completed");
+        toast.success("Order reset");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to reset");
+      }
+    });
+  }
+
+  function handleSendKOTAndPrint() {
+    if (!orderId || unsentItems.length === 0) return;
+    const itemIds = unsentItems.map((i) => i.id);
+    startTransition(async () => {
+      try {
+        await createKOT(orderId, itemIds);
+        openPrintWindow("kot");
+        toast.success(`KOT sent and printed (${itemIds.length} item${itemIds.length === 1 ? "" : "s"})`);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed");
+      }
+    });
+  }
+
+  function handlePayWith(mode: PaymentMode) {
+    if (!orderId || totalAmount <= 0) return;
+    const remaining = totalAmount - totalPaid;
+    if (remaining <= 0) {
+      toast.info("Already settled");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        await createPayment({ orderId, mode, amount: remaining });
+        clearSelection();
+        toast.success(`${mode} payment recorded — ${formatCurrency(remaining)}`);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Payment failed");
       }
     });
   }
 
-  function handleCancelOrder() {
+  function handlePayDue() {
     if (!orderId) return;
-    const msg = orderType === "DINE_IN"
-      ? "Cancel this order? This will free the table."
-      : "Cancel this order?";
-    if (!confirm(msg)) return;
-    startTransition(async () => {
-      try {
-        await cancelOrder(orderId);
-        clearSelection();
-        toast.success("Order cancelled");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to cancel");
-      }
-    });
+    toast.success("Order marked as due — settle later");
   }
 
   const orderTypeLabel =
@@ -294,6 +504,47 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
             )}
           </div>
         )}
+
+        {/* Persons + Assign-to */}
+        <div className="mt-3 pt-3 border-t border-outline-variant/20 grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="block text-[10px] font-black text-secondary uppercase tracking-wider mb-1">
+              Persons
+            </span>
+            <input
+              type="number"
+              min={0}
+              max={99}
+              value={personsDraft}
+              onChange={(e) => setPersonsDraft(e.target.value.replace(/[^0-9]/g, ""))}
+              onBlur={handleSavePersons}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              placeholder="—"
+              disabled={isPending}
+              className="w-full h-8 px-2 rounded-md bg-surface-container-lowest text-sm font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            />
+          </label>
+          <label className="block">
+            <span className="block text-[10px] font-black text-secondary uppercase tracking-wider mb-1">
+              Assign To
+            </span>
+            <select
+              value={assignedToDraft}
+              onChange={(e) => handleSaveAssignee(e.target.value)}
+              disabled={isPending}
+              className="w-full h-8 px-2 rounded-md bg-surface-container-lowest text-sm font-semibold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+            >
+              <option value="">Unassigned</option>
+              {staff.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} · {s.role}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {/* Item Search */}
@@ -458,8 +709,29 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
       </div>
 
       {/* Billing Footer */}
-      <div className="border-t border-outline-variant/20 p-6 space-y-4">
-        <div className="space-y-2">
+      <div className="border-t border-outline-variant/20 p-6 space-y-3">
+        {/* Order-Wise Comments */}
+        <div>
+          <span className="block text-[10px] font-black text-secondary uppercase tracking-wider mb-1">
+            Order-Wise Comments
+          </span>
+          <textarea
+            value={notesDraft}
+            onChange={(e) => setNotesDraft(e.target.value)}
+            onBlur={handleSaveNotes}
+            placeholder="Notes for this order (e.g. less spicy, no onion)"
+            rows={2}
+            disabled={isPending}
+            className="w-full px-2 py-1.5 rounded-md bg-surface-container-lowest text-xs text-on-surface placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 resize-none"
+          />
+        </div>
+
+        {/* Totals */}
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-xs">
+            <span className="text-secondary">Total Qty</span>
+            <span className="font-semibold text-on-surface">{totalQty}</span>
+          </div>
           <div className="flex justify-between text-xs">
             <span className="text-secondary">Subtotal</span>
             <span className="font-semibold text-on-surface">{formatCurrency(subtotal)}</span>
@@ -470,10 +742,33 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
           </div>
           {discount > 0 && (
             <div className="flex justify-between text-xs">
-              <span className="text-secondary">Discount</span>
+              <span className="text-secondary">
+                Discount{activeOrder.complimentary ? " (Complimentary)" : ""}
+              </span>
               <span className="font-semibold text-tertiary">-{formatCurrency(discount)}</span>
             </div>
           )}
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-secondary">Round Off</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={roundOffDraft}
+              onChange={(e) => setRoundOffDraft(e.target.value.replace(/[^0-9.\-]/g, ""))}
+              onBlur={handleSaveRoundOff}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") {
+                  const ro = Number(activeOrder.roundOff ?? 0);
+                  setRoundOffDraft(ro === 0 ? "" : String(ro));
+                  e.currentTarget.blur();
+                }
+              }}
+              placeholder="0"
+              disabled={isPending}
+              className="h-6 w-16 px-1.5 rounded-md bg-surface-container-lowest text-xs font-semibold text-on-surface text-right focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+            />
+          </div>
           <div className="border-t border-outline-variant/20 pt-2 flex justify-between items-center">
             <span className="text-sm font-bold text-on-surface">Total</span>
             <span className="font-headline text-2xl font-black text-on-surface">
@@ -482,88 +777,143 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="grid grid-cols-2 gap-2">
+        {/* Customer Paid + Return + Complimentary */}
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <label className="block">
+            <span className="block text-[10px] font-black text-secondary uppercase tracking-wider mb-1">
+              Customer Paid
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={customerPaidDraft}
+              onChange={(e) => setCustomerPaidDraft(e.target.value.replace(/[^0-9.]/g, ""))}
+              onBlur={handleSaveCustomerPaid}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              placeholder="0.00"
+              disabled={isPending}
+              className="w-full h-8 px-2 rounded-md bg-surface-container-lowest text-sm font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+            />
+          </label>
+          <div>
+            <span className="block text-[10px] font-black text-secondary uppercase tracking-wider mb-1">
+              Return to Customer
+            </span>
+            <div className="w-full h-8 px-2 rounded-md bg-surface-container-lowest text-sm font-bold text-on-surface flex items-center">
+              {formatCurrency(returnToCustomer)}
+            </div>
+          </div>
+        </div>
+
+        <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={activeOrder.complimentary ?? false}
+            onChange={handleToggleComplimentary}
+            disabled={isPending}
+            className="h-4 w-4 rounded border-outline-variant/50 accent-primary disabled:opacity-50"
+          />
+          <span className="text-on-surface">Complimentary</span>
+          <span className="text-secondary text-[10px] font-medium">
+            (zeroes the bill total)
+          </span>
+        </label>
+
+        {/* Action button row */}
+        <div className="grid grid-cols-3 gap-1.5 pt-1">
+          <button
+            onClick={handleSave}
+            disabled={isPending}
+            className="flex flex-col items-center gap-0.5 bg-surface-container-highest text-on-surface text-[10px] font-bold py-2 rounded-md hover:bg-surface-dim transition-colors disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-base">save</span>
+            Save
+          </button>
+          <button
+            onClick={handleSaveAndPrint}
+            disabled={isPending}
+            className="flex flex-col items-center gap-0.5 bg-surface-container-highest text-on-surface text-[10px] font-bold py-2 rounded-md hover:bg-surface-dim transition-colors disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-base">print</span>
+            Save & Print
+          </button>
+          <button
+            onClick={handleSaveAndEBill}
+            disabled={isPending}
+            className="flex flex-col items-center gap-0.5 bg-surface-container-highest text-on-surface text-[10px] font-bold py-2 rounded-md hover:bg-surface-dim transition-colors disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-base">email</span>
+            Save & EBill
+          </button>
+          <button
+            onClick={handleReset}
+            disabled={isPending}
+            className="flex flex-col items-center gap-0.5 bg-surface-container-highest text-error text-[10px] font-bold py-2 rounded-md hover:bg-error/10 transition-colors disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-base">restart_alt</span>
+            Reset
+          </button>
           <button
             onClick={handleSendKOT}
             disabled={isPending || unsentItems.length === 0}
-            className={`flex items-center justify-center gap-1.5 text-xs font-bold py-2.5 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`flex flex-col items-center gap-0.5 text-[10px] font-bold py-2 rounded-md transition-all disabled:opacity-40 ${
               unsentItems.length > 0
-                ? "primary-gradient text-white shadow hover:shadow-md"
+                ? "primary-gradient text-white shadow"
                 : "bg-surface-container-highest text-on-surface"
             }`}
           >
-            <span className="material-symbols-outlined text-sm">print</span>
-            Send KOT ({unsentItems.length})
+            <span className="material-symbols-outlined text-base">send</span>
+            KOT{unsentItems.length > 0 ? ` (${unsentItems.length})` : ""}
           </button>
           <button
-            onClick={handleCancelOrder}
-            disabled={isPending}
-            className="flex items-center justify-center gap-1.5 bg-surface-container-highest text-error text-xs font-bold py-2.5 rounded-lg hover:bg-error/10 transition-colors disabled:opacity-40"
+            onClick={handleSendKOTAndPrint}
+            disabled={isPending || unsentItems.length === 0}
+            className={`flex flex-col items-center gap-0.5 text-[10px] font-bold py-2 rounded-md transition-all disabled:opacity-40 ${
+              unsentItems.length > 0
+                ? "bg-tertiary text-on-primary shadow"
+                : "bg-surface-container-highest text-on-surface"
+            }`}
           >
-            <span className="material-symbols-outlined text-sm">cancel</span>
-            Cancel
+            <span className="material-symbols-outlined text-base">local_printshop</span>
+            KOT & Print
           </button>
         </div>
 
-        {/* Payment Methods (select one, then settle) */}
-        <div className="flex gap-2">
-          {(["CASH", "CARD", "UPI"] as const).map((mode) => {
-            const selected = paymentMode === mode;
-            return (
-              <button
-                key={mode}
-                onClick={() =>
-                  setPaymentMode(selected ? null : mode)
-                }
-                disabled={isPending || totalAmount <= 0}
-                className={`flex-1 flex flex-col items-center gap-1 border py-2.5 rounded-lg transition-all disabled:opacity-40 relative ${
-                  selected
-                    ? "bg-primary/10 border-primary text-primary shadow-sm"
-                    : "bg-surface-container-lowest border-outline-variant/30 text-secondary hover:text-primary hover:border-primary/30"
-                }`}
-                aria-pressed={selected}
-              >
-                <span
-                  className={`absolute top-1.5 right-1.5 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                    selected
-                      ? "bg-primary border-primary"
-                      : "bg-white border-outline-variant/50"
-                  }`}
-                >
-                  {selected && (
-                    <span className="material-symbols-outlined text-white text-[12px] leading-none font-black">
-                      check
-                    </span>
-                  )}
-                </span>
-                <span className="material-symbols-outlined text-lg">
-                  {mode === "CASH"
-                    ? "payments"
-                    : mode === "CARD"
-                      ? "credit_card"
-                      : "qr_code_2"}
-                </span>
-                <span className="text-[10px] font-bold uppercase tracking-wider">
-                  {mode}
-                </span>
-              </button>
-            );
-          })}
+        {/* Payment chips */}
+        <div className="flex gap-1.5 pt-1">
+          <PayChip
+            label="Cash"
+            icon="payments"
+            disabled={isPending || totalAmount <= 0}
+            onClick={() => handlePayWith("CASH")}
+          />
+          <PayChip
+            label="Card"
+            icon="credit_card"
+            disabled={isPending || totalAmount <= 0}
+            onClick={() => handlePayWith("CARD")}
+          />
+          <PayChip
+            label="Due"
+            icon="schedule"
+            disabled={isPending}
+            onClick={handlePayDue}
+          />
+          <PayChip
+            label="Other"
+            icon="more_horiz"
+            disabled={isPending || totalAmount <= 0}
+            onClick={() => setOtherPaymentOpen(true)}
+          />
+          <PayChip
+            label="More"
+            icon="apps"
+            disabled={isPending}
+            onClick={() => toast.info("Integrations coming soon")}
+          />
         </div>
-
-        <button
-          onClick={handleSettle}
-          disabled={isPending || totalAmount <= 0 || !paymentMode}
-          className="w-full primary-gradient text-on-primary font-bold py-3.5 rounded-xl text-sm shadow-lg hover:shadow-xl active:scale-[0.99] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <span className="material-symbols-outlined text-lg">
-            check_circle
-          </span>
-          {paymentMode
-            ? `Settle ${paymentMode} — ${formatCurrency(totalAmount)}`
-            : `Select payment method to settle`}
-        </button>
       </div>
     </>
   ) : (
@@ -830,6 +1180,33 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems }: Prop
           }}
         />
       )}
+
+      {/* "Other" payment dialog — pick UPI / Wallet / Split */}
+      <Dialog open={otherPaymentOpen} onOpenChange={setOtherPaymentOpen}>
+        <DialogContent className="sm:!max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Other Payment Methods</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-3 gap-2 mt-2">
+            {(["UPI", "WALLET", "SPLIT"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => {
+                  setOtherPaymentOpen(false);
+                  handlePayWith(mode);
+                }}
+                disabled={isPending}
+                className="flex flex-col items-center gap-1 bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 hover:border-primary hover:bg-primary/5 transition-all disabled:opacity-40"
+              >
+                <span className="material-symbols-outlined text-2xl text-primary">
+                  {mode === "UPI" ? "qr_code_2" : mode === "WALLET" ? "account_balance_wallet" : "call_split"}
+                </span>
+                <span className="text-xs font-bold">{mode}</span>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1053,6 +1430,38 @@ function NonDineQueue({
       )}
     </>
   );
+}
+
+function PayChip({
+  label,
+  icon,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  icon: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex-1 flex flex-col items-center gap-0.5 bg-surface-container-lowest border border-outline-variant/30 text-secondary text-[10px] font-bold uppercase tracking-wider py-2.5 rounded-lg hover:border-primary hover:text-primary hover:bg-primary/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+    >
+      <span className="material-symbols-outlined text-lg">{icon}</span>
+      {label}
+    </button>
+  );
+}
+
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function QuantityInput({

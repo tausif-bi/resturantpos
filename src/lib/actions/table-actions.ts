@@ -47,6 +47,7 @@ export async function getTablesWithActiveOrders() {
             },
           },
           createdBy: { select: { name: true } },
+          assignedTo: { select: { id: true, name: true } },
           payments: true,
         },
       },
