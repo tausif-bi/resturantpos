@@ -76,6 +76,7 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
   const [customerPaidDraft, setCustomerPaidDraft] = useState("");
   const [lastSyncedOrderId, setLastSyncedOrderId] = useState<string | null>(null);
   const [otherPaymentOpen, setOtherPaymentOpen] = useState(false);
+  const [searchHighlight, setSearchHighlight] = useState(0);
 
   // Floor-map mini-panel state (Phase 4).
   const [quickSearch, setQuickSearch] = useState("");
@@ -252,6 +253,34 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
     scored.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name));
     return scored.slice(0, 8).map((s) => s.item);
   }, [search, menuItems]);
+
+  // Reset the keyboard highlight to the top whenever the result set changes.
+  useEffect(() => {
+    setSearchHighlight(0);
+  }, [searchResults]);
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (searchResults.length === 0) {
+      if (e.key === "Escape") setSearch("");
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSearchHighlight((h) => (h + 1) % searchResults.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSearchHighlight((h) => (h - 1 + searchResults.length) % searchResults.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const item = searchResults[searchHighlight];
+      if (!item) return;
+      const variantId = item.variants.length > 0 ? item.variants[0].id : undefined;
+      handleAddItem(item, variantId);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setSearch("");
+    }
+  }
 
   function clearSelection() {
     setSelectedTableId(null);
@@ -709,6 +738,7 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
             placeholder="Add item — type name or short code (e.g. VMS)"
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-stone-400"
             autoComplete="off"
@@ -730,10 +760,18 @@ export function POSClient({ tables, nonDineOrders, categories, menuItems, staff 
                 No items match &quot;{search}&quot;
               </p>
             ) : (
-              searchResults.map((item) => (
+              searchResults.map((item, idx) => (
                 <div
                   key={item.id}
-                  className="px-3 py-2 hover:bg-surface-container-low cursor-pointer border-b border-outline-variant/10 last:border-b-0"
+                  ref={(el) => {
+                    if (el && idx === searchHighlight) {
+                      el.scrollIntoView({ block: "nearest" });
+                    }
+                  }}
+                  onMouseEnter={() => setSearchHighlight(idx)}
+                  className={`px-3 py-2 cursor-pointer border-b border-outline-variant/10 last:border-b-0 ${
+                    idx === searchHighlight ? "bg-primary/10" : "hover:bg-surface-container-low"
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
